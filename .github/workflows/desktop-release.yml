@@ -62,6 +62,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Skip macOS code signing (no Apple Developer certificate)
+          APPLE_SIGNING_IDENTITY: '-'
+          TAURI_SIGNING_IDENTITY: '-'
         with:
           projectPath: clipstash-desktop
           tagName: ${{ github.ref_name }}
@@ -70,3 +73,10 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
+
+      - name: Remove quarantine attribute from macOS artifacts
+        if: runner.os == 'macOS'
+        run: |
+          find clipstash-desktop/src-tauri/target/${{ matrix.target }}/release/bundle -name "*.dmg" -o -name "*.app" | while read f; do
+            xattr -cr "$f" 2>/dev/null || true
+          done

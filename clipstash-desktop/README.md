@@ -44,7 +44,11 @@
 
 1. Download `ClipStash_x.x.x_aarch64.dmg` (Apple Silicon) or `ClipStash_x.x.x_x64.dmg` (Intel) from [Releases](https://github.com/lonsty/clipstash/releases).
 2. Open the `.dmg` file and drag **ClipStash** to the **Applications** folder.
-3. On first launch, macOS may show a security warning. Go to **System Settings → Privacy & Security** and click **Open Anyway**.
+3. If macOS shows **"ClipStash is damaged and can't be opened"**, run the following command in Terminal:
+   ```bash
+   xattr -cr /Applications/ClipStash.app
+   ```
+   This is expected for unsigned builds. Alternatively, go to **System Settings → Privacy & Security** and click **Open Anyway**.
 
 ### Windows
 

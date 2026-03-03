@@ -44,7 +44,11 @@
 
 1. 从 [Releases](https://github.com/lonsty/clipstash/releases) 下载 `ClipStash_x.x.x_aarch64.dmg`（Apple Silicon）或 `ClipStash_x.x.x_x64.dmg`（Intel）。
 2. 打开 `.dmg` 文件，将 **ClipStash** 拖入 **应用程序** 文件夹。
-3. 首次启动时可能弹出安全提示，前往 **系统设置 → 隐私与安全性**，点击 **仍要打开**。
+3. 如果 macOS 提示 **"ClipStash 已损坏，无法打开"**，请在终端中执行：
+   ```bash
+   xattr -cr /Applications/ClipStash.app
+   ```
+   这是未签名应用的正常现象。也可以前往 **系统设置 → 隐私与安全性**，点击 **仍要打开**。
 
 ### Windows
 
