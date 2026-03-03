@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-utils/schema.json",
+  "productName": "ClipStash",
+  "version": "0.1.0",
+  "identifier": "com.clipstash.desktop",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "ClipStash",
+        "width": 420,
+        "height": 580,
+        "minWidth": 360,
+        "minHeight": 480,
+        "resizable": false,
+        "center": true,
+        "visible": true,
+        "decorations": false,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "copyright": "Copyright (c) 2025 lonsty",
+    "category": "Utility",
+    "shortDescription": "Cross-platform clipboard cache manager",
+    "longDescription": "ClipStash Desktop is a cross-platform clipboard cache manager. Cache clipboard content with one click and revisit anytime.",
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

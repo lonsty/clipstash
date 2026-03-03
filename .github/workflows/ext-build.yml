@@ -1,0 +1,54 @@
+name: Extension Build & Package
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'clipstash-ext/**'
+      - '.github/workflows/ext-build.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'clipstash-ext/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies for canvas
+        run: sudo apt-get update && sudo apt-get install -y build-essential libcairo2-dev libjpeg-dev libpango1.0-dev libgif-dev librsvg2-dev
+
+      - name: Install npm dependencies
+        working-directory: clipstash-ext
+        run: npm ci
+
+      - name: Generate icons
+        working-directory: clipstash-ext
+        run: npm run icons
+
+      - name: Build
+        working-directory: clipstash-ext
+        run: npm run build
+
+      - name: Package zip
+        working-directory: clipstash-ext
+        run: npm run zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipstash-extension
+          path: clipstash-ext/dist/
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipstash-zip
+          path: clipstash-ext/clipstash-*.zip

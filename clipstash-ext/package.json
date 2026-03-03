@@ -1,0 +1,17 @@
+{
+  "name": "clipstash",
+  "version": "0.1.0",
+  "description": "Chrome extension - ClipStash: clipboard content cache",
+  "author": "ClipStash",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/build.js",
+    "zip": "node scripts/build.js --zip",
+    "icons": "node scripts/generate-icons.js",
+    "clean": "rm -rf dist/"
+  },
+  "devDependencies": {
+    "canvas": "^3.2.1"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "clipstash-desktop",
+  "version": "0.1.0",
+  "description": "ClipStash Desktop - Cross-platform clipboard cache manager",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:icon": "tauri icon icons/app-icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "license": "MIT",
+  "author": "lonsty",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lonsty/clipstash"
+  }
+}
