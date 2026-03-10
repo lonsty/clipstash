@@ -1,8 +1,9 @@
 // ClipStash - Popup interaction logic
 
 import {
-  getCaches, removeCache, clearAllCaches, updateCacheTags,
-  togglePin, searchCaches, getAllTags, getStorageStats,
+  removeCache, clearAllCaches, updateCacheTags,
+  togglePin, updateCacheContent, updateCacheLanguage,
+  searchCaches, getAllTags, getStorageStats,
   getSettings, saveSettings, getTheme, saveTheme,
   exportCaches, importCaches, formatBytes
 } from '../utils/storage.js';
@@ -17,6 +18,7 @@ let displayedCount = 0;
 let isLoadingMore = false;
 let currentQuery = '';
 let currentModalData = null;
+let isEditMode = false;
 let confirmCallback = null;
 
 // DOM references
@@ -30,10 +32,13 @@ const statsBar = document.getElementById('stats-bar');
 const statsText = document.getElementById('stats-text');
 const modalOverlay = document.getElementById('modal-overlay');
 const modalContent = document.getElementById('modal-content');
+const modalCode = document.getElementById('modal-code');
+const modalEditor = document.getElementById('modal-editor');
 const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
 const modalHtmlWrap = document.getElementById('modal-html-wrap');
 const modalMeta = document.getElementById('modal-meta');
+const modalTagsSection = document.querySelector('.modal-tags-section');
 const modalTagsEl = document.getElementById('modal-tags');
 const btnAddTag = document.getElementById('btn-add-tag');
 const tagInputWrap = document.getElementById('tag-input-wrap');
@@ -42,6 +47,8 @@ const tagSuggestions = document.getElementById('tag-suggestions');
 const btnModalClose = document.getElementById('btn-modal-close');
 const btnModalCopy = document.getElementById('btn-modal-copy');
 const btnModalFullscreen = document.getElementById('btn-modal-fullscreen');
+const btnModalEdit = document.getElementById('btn-modal-edit');
+const modalLangSelect = document.getElementById('modal-lang-select');
 const btnClearAll = document.getElementById('btn-clear-all');
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitleEl = document.getElementById('confirm-title');
@@ -60,6 +67,7 @@ const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
 const importFile = document.getElementById('import-file');
 const importStatus = document.getElementById('import-status');
+const appVersionEl = document.getElementById('app-version');
 const btnCacheNow = document.getElementById('btn-cache-now');
 
 // SVG icons
@@ -88,6 +96,25 @@ const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 </svg>`;
 
 // ===== Utility Functions =====
+
+function highlightCode(text, language) {
+  if (!language || typeof window.hljs === 'undefined') return escapeHtml(text);
+  try {
+    const result = window.hljs.highlight(text, { language, ignoreIllegals: true });
+    return result.value;
+  } catch {
+    return escapeHtml(text);
+  }
+}
+
+const HLJS_LIGHT_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#24292e;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}.hljs-built_in,.hljs-symbol{color:#e36209}.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}.hljs-subst{color:#24292e}.hljs-section{color:#005cc5;font-weight:700}.hljs-bullet{color:#735c0f}.hljs-emphasis{color:#24292e;font-style:italic}.hljs-strong{color:#24292e;font-weight:700}.hljs-addition{color:#22863a;background-color:#f0fff4}.hljs-deletion{color:#b31d28;background-color:#ffeef0}`;
+const HLJS_DARK_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#c9d1d9;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#ff7b72}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#d2a8ff}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#79c0ff}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#a5d6ff}.hljs-built_in,.hljs-symbol{color:#ffa657}.hljs-code,.hljs-comment,.hljs-formula{color:#8b949e}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#7ee787}.hljs-subst{color:#c9d1d9}.hljs-section{color:#1f6feb;font-weight:700}.hljs-bullet{color:#f2cc60}.hljs-emphasis{color:#c9d1d9;font-style:italic}.hljs-strong{color:#c9d1d9;font-weight:700}.hljs-addition{color:#aff5b4;background-color:#033a16}.hljs-deletion{color:#ffdcd7;background-color:#67060c}`;
+
+function getHljsCss() {
+  const isDark = currentTheme === 'dark' ||
+    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return isDark ? HLJS_DARK_CSS : HLJS_LIGHT_CSS;
+}
 
 function truncateText(text) {
   const lines = text.split('\n');
@@ -128,6 +155,12 @@ let currentTheme = 'system';
 async function applyTheme(theme) {
   currentTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
+  const isDark = theme === 'dark' ||
+    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const hljsThemeEl = document.getElementById('hljs-theme');
+  if (hljsThemeEl) {
+    hljsThemeEl.href = isDark ? '../vendor/hljs-dark.css' : '../vendor/hljs-light.css';
+  }
 }
 
 // ===== i18n DOM binding =====
@@ -165,7 +198,13 @@ function hideConfirm() {
 function renderTagBadge(tagName, removable, onRemove) {
   const span = document.createElement('span');
   span.className = 'tag';
-  span.textContent = tagName;
+  span.title = tagName;
+
+  const textSpan = document.createElement('span');
+  textSpan.className = 'tag-text';
+  textSpan.textContent = tagName;
+  span.appendChild(textSpan);
+
   if (removable && onRemove) {
     const removeBtn = document.createElement('span');
     removeBtn.className = 'tag-remove';
@@ -181,23 +220,25 @@ function renderTagBadge(tagName, removable, onRemove) {
 
 function renderModalTags() {
   if (!currentModalData) return;
-  modalTagsEl.innerHTML = '';
   const tags = currentModalData.tags || [];
-  if (tags.length === 0) {
-    const hint = document.createElement('span');
-    hint.style.cssText = 'font-size:11px;color:var(--text-muted);';
-    hint.textContent = t('noTags');
-    modalTagsEl.appendChild(hint);
-    return;
-  }
-  for (const tag of tags) {
-    modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
-      const newTags = currentModalData.tags.filter(x => x !== tg);
-      await updateCacheTags(currentModalData.id, newTags);
-      currentModalData.tags = newTags;
-      renderModalTags();
-      await refreshList();
-    }));
+
+  modalTagsEl.innerHTML = '';
+
+  if (tags.length > 0) {
+    modalTagsEl.style.display = 'flex';
+    modalTagsSection.classList.remove('no-tags');
+    for (const tag of tags) {
+      modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
+        const newTags = currentModalData.tags.filter(x => x !== tg);
+        await updateCacheTags(currentModalData.id, newTags);
+        currentModalData.tags = newTags;
+        renderModalTags();
+        await refreshList();
+      }));
+    }
+  } else {
+    modalTagsEl.style.display = 'none';
+    modalTagsSection.classList.add('no-tags');
   }
 }
 
@@ -254,7 +295,11 @@ function createCacheCard(item) {
     contentHtml = `<img class="cache-image-thumb" src="${item.imageDataUrl}" alt="${t('imageAlt')}">`;
   } else {
     const preview = truncateText(item.content || '');
-    contentHtml = `<div class="cache-text">${escapeHtml(preview)}</div>`;
+    if (item.language) {
+      contentHtml = `<pre class="cache-text"><code class="hljs">${highlightCode(preview, item.language)}</code></pre>`;
+    } else {
+      contentHtml = `<div class="cache-text">${escapeHtml(preview)}</div>`;
+    }
   }
 
   let typeBadge = '';
@@ -263,10 +308,13 @@ function createCacheCard(item) {
   } else if (type === 'html') {
     typeBadge = `<span class="cache-type-badge type-html">${t('typeHtml')}</span>`;
   }
+  if (item.language) {
+    typeBadge += `<span class="cache-lang-badge">${escapeHtml(item.language)}</span>`;
+  }
 
   let tagsHtml = '';
   if (tags.length > 0) {
-    tagsHtml = `<div class="cache-tags-row">${tags.map(tg => `<span class="tag">${escapeHtml(tg)}</span>`).join('')}</div>`;
+    tagsHtml = `<div class="cache-tags-row">${tags.map(tg => `<span class="tag" title="${escapeHtml(tg)}"><span class="tag-text">${escapeHtml(tg)}</span></span>`).join('')}</div>`;
   }
 
   const metaText = type === 'image'
@@ -485,12 +533,23 @@ function showCopyFeedback(btnEl) {
 
 function openModal(item) {
   currentModalData = item;
+  isEditMode = false;
   const type = item.type || 'text';
 
   // Reset all content areas
   modalContent.style.display = 'none';
   modalImageWrap.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
+  modalEditor.style.display = 'none';
+
+  // Reset edit button state
+  btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+  btnModalEdit.title = t('edit');
+
+  // Show/hide edit & language controls based on type
+  btnModalEdit.style.display = (type === 'image') ? 'none' : 'inline-flex';
+  modalLangSelect.style.display = (type === 'image' || type === 'html') ? 'none' : 'inline-flex';
+  modalLangSelect.value = item.language || '';
 
   if (type === 'image' && item.imageDataUrl) {
     modalImage.src = item.imageDataUrl;
@@ -499,13 +558,19 @@ function openModal(item) {
   } else if (type === 'html' && item.htmlContent) {
     modalHtmlWrap.innerHTML = item.htmlContent;
     modalHtmlWrap.style.display = 'block';
-    // Also show plain text fallback
     if (item.content) {
-      modalContent.textContent = item.content;
+      modalCode.textContent = item.content;
+      modalCode.className = '';
       modalContent.style.display = 'block';
     }
   } else {
-    modalContent.textContent = item.content;
+    if (item.language) {
+      modalCode.innerHTML = highlightCode(item.content || '', item.language);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = item.content;
+      modalCode.className = '';
+    }
     modalContent.style.display = 'block';
   }
 
@@ -524,6 +589,8 @@ function openModal(item) {
 function closeModal() {
   modalOverlay.style.display = 'none';
   currentModalData = null;
+  isEditMode = false;
+  modalEditor.style.display = 'none';
   tagInputWrap.style.display = 'none';
   tagSuggestions.style.display = 'none';
 }
@@ -536,21 +603,71 @@ function openFullscreen() {
     (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const bgColor = isDark ? '#1a1b1e' : '#ffffff';
   const textColor = isDark ? '#e4e5e7' : '#111827';
+  const btnBg = isDark ? '#25262b' : '#f1f5f9';
+  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
+  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
+  const successColor = '#22c55e';
   const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
 
   let bodyContent = '';
+  let copyDataScript = '';
+
   if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;">
+    bodyContent = `<div style="position:relative;margin:16px;padding:16px;min-height:calc(100vh - 32px);border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);display:flex;align-items:center;justify-content:center;">
+      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 64px);object-fit:contain;">
     </div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const img = document.querySelector('img');
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(async (blob) => {
+            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+            showCopyOk();
+          }, 'image/png');
+        } catch { showCopyOk(); }
+      }`;
   } else if (type === 'html' && item.htmlContent) {
-    bodyContent = `<div style="max-width:900px;margin:0 auto;padding:40px 24px;font-size:15px;line-height:1.8;">
+    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
       ${item.htmlContent}
     </div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const htmlStr = \`${escapedHtml}\`;
+          const textStr = \`${escapedText}\`;
+          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
+          const textBlob = new Blob([textStr], {type: 'text/plain'});
+          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
+          showCopyOk();
+        } catch {
+          await navigator.clipboard.writeText(\`${escapedText}\`);
+          showCopyOk();
+        }
+      }`;
   } else {
-    const escaped = escapeHtml(item.content || '');
-    bodyContent = `<pre style="max-width:900px;margin:0 auto;padding:40px 24px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;">${escaped}</pre>`;
+    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
+    const codeClass = item.language ? ' class="hljs"' : '';
+    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<pre style="margin:16px;padding:16px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);"><code${codeClass}>${escaped}</code></pre>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          await navigator.clipboard.writeText(\`${escapedForJs}\`);
+          showCopyOk();
+        } catch {}
+      }`;
   }
+
+  const copyBtnLabel = t('copy');
+  const copiedLabel = t('copied');
+  const hljsCssInline = item.language ? getHljsCss() : '';
 
   const html = `<!DOCTYPE html>
 <html>
@@ -561,9 +678,35 @@ function openFullscreen() {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   img { display: block; }
+  code { padding: 0 !important; background: transparent !important; display: block; }
+  code.hljs { padding: 0 !important; background: transparent !important; }
+  .toolbar { position: fixed; top: 28px; right: 28px; z-index: 10; display: flex; gap: 8px; }
+  .copy-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: 1px solid ${btnBorder}; border-radius: 6px; background: ${btnBg}; color: ${textColor}; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.2s; opacity: 0.5; backdrop-filter: blur(8px); }
+  .copy-btn:hover { background: ${btnHover}; opacity: 1; }
+  .copy-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; opacity: 1; }
+  .copy-btn svg { width: 14px; height: 14px; }
+  ${hljsCssInline}
 </style>
 </head>
-<body>${bodyContent}</body>
+<body>
+<div class="toolbar">
+  <button class="copy-btn" onclick="doCopy()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    <span id="copy-text">${copyBtnLabel}</span>
+  </button>
+</div>
+${bodyContent}
+<script>
+  function showCopyOk() {
+    const btn = document.querySelector('.copy-btn');
+    const txt = document.getElementById('copy-text');
+    btn.classList.add('copied');
+    txt.textContent = '${copiedLabel}';
+    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
+  }
+  ${copyDataScript}
+</script>
+</body>
 </html>`;
 
   const blob = new Blob([html], { type: 'text/html' });
@@ -676,6 +819,65 @@ btnModalCopy.addEventListener('click', () => {
   copyToClipboard(currentModalData, btnModalCopy);
 });
 btnModalFullscreen.addEventListener('click', openFullscreen);
+
+// Language selector
+modalLangSelect.addEventListener('change', async () => {
+  if (!currentModalData) return;
+  const lang = modalLangSelect.value || null;
+  await updateCacheLanguage(currentModalData.id, lang);
+  currentModalData.language = lang;
+  if (currentModalData.type !== 'image' && currentModalData.type !== 'html') {
+    if (lang) {
+      modalCode.innerHTML = highlightCode(currentModalData.content || '', lang);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = currentModalData.content;
+      modalCode.className = '';
+    }
+  }
+  await refreshList();
+});
+
+// Edit mode toggle
+btnModalEdit.addEventListener('click', async () => {
+  if (!currentModalData) return;
+
+  if (!isEditMode) {
+    isEditMode = true;
+    modalEditor.value = currentModalData.content || '';
+    modalContent.style.display = 'none';
+    modalHtmlWrap.style.display = 'none';
+    modalEditor.style.display = 'block';
+    modalEditor.focus();
+    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
+    btnModalEdit.title = t('save');
+  } else {
+    const newContent = modalEditor.value;
+    await updateCacheContent(currentModalData.id, newContent);
+    currentModalData.content = newContent;
+    currentModalData.contentLength = [...newContent].length;
+    isEditMode = false;
+    modalEditor.style.display = 'none';
+
+    const lang = currentModalData.language;
+    if (lang) {
+      modalCode.innerHTML = highlightCode(newContent, lang);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = newContent;
+      modalCode.className = '';
+    }
+    modalContent.style.display = 'block';
+
+    const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
+    modalMeta.textContent = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
+
+    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    btnModalEdit.title = t('edit');
+
+    await refreshList();
+  }
+});
 
 // Tag input
 btnAddTag.addEventListener('click', () => {
@@ -799,6 +1001,11 @@ btnSettings.addEventListener('click', async () => {
 
   importStatus.style.display = 'none';
   await loadShortcutDisplay();
+
+  // Show app version from manifest
+  const manifest = chrome.runtime.getManifest();
+  appVersionEl.textContent = `v${manifest.version}`;
+
   settingsOverlay.style.display = 'flex';
 });
 
@@ -896,5 +1103,12 @@ async function init() {
   setupScrollLoading();
   await refreshList();
 }
+
+// Listen for messages from background service worker (e.g. context menu "Settings")
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'open-settings') {
+    btnSettings.click();
+  }
+});
 
 init();

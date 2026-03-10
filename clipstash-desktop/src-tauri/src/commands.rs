@@ -68,6 +68,7 @@ pub fn add_cache(
         tags,
         pinned,
         pinned_at,
+        language: None,
     };
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.add_cache(&item).map_err(|e| e.to_string())
@@ -96,6 +97,23 @@ pub fn update_cache_tags(state: State<AppState>, id: String, tags: Vec<String>) 
 pub fn toggle_pin(state: State<AppState>, id: String) -> Result<bool, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.toggle_pin(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_cache_content(state: State<AppState>, id: String, content: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.update_cache_content(&id, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_cache_language(
+    state: State<AppState>,
+    id: String,
+    language: Option<String>,
+) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.update_cache_language(&id, language.as_deref())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -247,4 +265,59 @@ pub fn set_suppress_auto_hide(state: State<AppState>, suppress: bool) {
     if let Ok(mut flag) = state.suppress_auto_hide.lock() {
         *flag = suppress;
     }
+}
+
+#[tauri::command]
+pub fn open_sticky_window(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    html_content: String,
+) -> Result<bool, String> {
+    let label = format!("sticky_{}", db::generate_id());
+
+    let temp_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    let temp_file = temp_dir.join(format!("{}.html", &label));
+    std::fs::write(&temp_file, &html_content).map_err(|e| e.to_string())?;
+
+    let file_url = tauri::Url::from_file_path(&temp_file)
+        .map_err(|_| "failed to create file URL".to_string())?;
+
+    if let Ok(mut flag) = state.suppress_auto_hide.lock() {
+        *flag = true;
+    }
+
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(file_url))
+        .title("ClipStash - Sticky Note")
+        .inner_size(400.0, 350.0)
+        .always_on_top(true)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn update_tray_menu(
+    app: tauri::AppHandle,
+    settings_text: String,
+    quit_text: String,
+) -> Result<(), String> {
+    use tauri::menu::{Menu, MenuItem};
+
+    if let Some(tray) = app.tray_by_id("clipstash-tray") {
+        let open_settings =
+            MenuItem::with_id(&app, "open_settings", settings_text, true, None::<&str>)
+                .map_err(|e| e.to_string())?;
+        let quit = MenuItem::with_id(&app, "quit", quit_text, true, None::<&str>)
+            .map_err(|e| e.to_string())?;
+
+        let menu = Menu::with_items(&app, &[&open_settings, &quit])
+            .map_err(|e| e.to_string())?;
+
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }

@@ -398,7 +398,35 @@ body {
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
+  margin: 0;
+  padding: 0;
+}
+
+.cache-text code {
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.cache-text code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.cache-lang-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--primary-light);
+  color: var(--primary);
 }
 
 /* Image thumbnail in card */
@@ -461,7 +489,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  padding: 2px 8px 0;
+  padding: 2px 12px 0 12px;
 }
 
 .tag {
@@ -475,8 +503,13 @@ body {
   color: var(--primary);
   white-space: nowrap;
   max-width: 120px;
+}
+
+.tag-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .tag-remove {
@@ -486,6 +519,7 @@ body {
   opacity: 0;
   transition: opacity var(--transition);
   margin-left: 1px;
+  flex-shrink: 0;
 }
 
 .tag:hover .tag-remove {
@@ -647,13 +681,38 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border-light);
+  gap: 12px;
 }
 
-.modal-title {
-  font-size: 14px;
-  font-weight: 600;
+.modal-header .modal-meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.modal-header-actions .btn-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.modal-header-actions .btn-icon.is-pinned {
+  color: var(--warning);
+}
+
+.modal-header-actions .btn-icon:hover {
+  background: var(--bg-hover);
 }
 
 .modal-body {
@@ -671,6 +730,81 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--text);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.modal-content code {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.modal-content code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.modal-editor {
+  width: 100%;
+  min-height: 240px;
+  max-height: 300px;
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg-card);
+  outline: none;
+  resize: vertical;
+}
+
+.modal-lang-select {
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  background: var(--bg);
+  cursor: pointer;
+  outline: none;
+  max-width: 90px;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  box-shadow: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 16px;
+}
+
+[data-theme="dark"] .modal-lang-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b6c70' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] .modal-lang-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%236b6c70' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  }
+}
+
+.modal-lang-select:hover {
+  border-color: var(--text-muted);
+}
+
+.modal-lang-select:focus {
+  border-color: var(--primary);
 }
 
 .modal-image-wrap {
@@ -701,11 +835,23 @@ body {
   border-top: 1px solid var(--border-light);
 }
 
+/* 无标签时减少内边距 */
+.modal-tags-section.no-tags {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
 .modal-tags-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 6px;
+  gap: 8px;
+}
+
+/* 无标签时header不需要底部间距 */
+.modal-tags-section.no-tags .modal-tags-header {
+  margin-bottom: 0;
 }
 
 .modal-tags-label {
@@ -714,11 +860,21 @@ body {
   color: var(--text-secondary);
 }
 
+.modal-tags-header #modal-lang-select {
+  margin-left: auto;
+}
+
 .modal-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  min-height: 20px;
+  margin-bottom: 4px;
+}
+
+/* 无标签时不占用底部间距 */
+.modal-tags:empty,
+.modal-tags[style*="display: none"] {
+  margin-bottom: 0;
 }
 
 .modal-tags .tag {
@@ -787,20 +943,20 @@ body {
 .modal-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 10px 16px;
   border-top: 1px solid var(--border-light);
 }
 
-.modal-footer-actions {
+.modal-footer-main {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.modal-meta {
-  font-size: 11px;
-  color: var(--text-muted);
+.modal-footer-main .btn {
+  height: 28px;
+  padding: 0 12px;
 }
 
 /* Confirm Dialog */
@@ -1082,4 +1238,35 @@ body {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-light);
+}
+
+/* About section in Settings */
+.settings-about {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 0 4px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border-light);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.settings-about-name {
+  font-weight: 500;
+}
+
+.settings-about-version {
+  color: var(--text-muted);
+}
+
+.settings-about-link {
+  color: var(--primary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.settings-about-link:hover {
+  text-decoration: underline;
 }

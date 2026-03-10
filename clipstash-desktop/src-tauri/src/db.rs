@@ -22,6 +22,8 @@ pub struct CacheItem {
     pub pinned: bool,
     #[serde(rename = "pinnedAt")]
     pub pinned_at: Option<i64>,
+    /// language holds the user-selected syntax highlighting language (e.g. "json", "python").
+    pub language: Option<String>,
 }
 
 /// Settings represents user application settings.
@@ -97,7 +99,8 @@ impl Database {
                 created_at INTEGER NOT NULL,
                 content_length INTEGER NOT NULL,
                 pinned INTEGER NOT NULL DEFAULT 0,
-                pinned_at INTEGER
+                pinned_at INTEGER,
+                language TEXT
             );
 
             CREATE TABLE IF NOT EXISTS cache_tags (
@@ -117,6 +120,16 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_cache_tags_tag ON cache_tags(tag);",
         )?;
 
+        // Migration: add language column if missing (for existing databases)
+        let has_language: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('caches') WHERE name='language'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_language {
+            conn.execute_batch("ALTER TABLE caches ADD COLUMN language TEXT")?;
+        }
+
         Ok(Self {
             conn,
             db_path: path.to_string(),
@@ -127,7 +140,7 @@ impl Database {
     pub fn get_caches(&self, offset: i64, limit: i64) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at
+                    created_at, content_length, pinned, pinned_at, language
              FROM caches
              ORDER BY pinned DESC, CASE WHEN pinned = 1 THEN pinned_at ELSE created_at END DESC
              LIMIT ?1 OFFSET ?2",
@@ -146,6 +159,7 @@ impl Database {
                 tags: Vec::new(),
                 pinned: row.get::<_, i32>(8)? != 0,
                 pinned_at: row.get(9)?,
+                language: row.get(10)?,
             })
         })?;
 
@@ -216,8 +230,8 @@ impl Database {
 
         self.conn.execute(
             "INSERT INTO caches (id, cache_type, content, html_content, image_data_url, image_hash,
-                                 created_at, content_length, pinned, pinned_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                 created_at, content_length, pinned, pinned_at, language)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 item.id,
                 item.cache_type,
@@ -229,6 +243,7 @@ impl Database {
                 item.content_length,
                 item.pinned as i32,
                 item.pinned_at,
+                item.language,
             ],
         )?;
 
@@ -304,6 +319,25 @@ impl Database {
         Ok(true)
     }
 
+    /// update_cache_content updates the content and content_length of a cache record.
+    pub fn update_cache_content(&self, id: &str, content: &str) -> SqlResult<bool> {
+        let content_length = content.chars().count() as i64;
+        let affected = self.conn.execute(
+            "UPDATE caches SET content = ?1, content_length = ?2 WHERE id = ?3",
+            params![content, content_length, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// update_cache_language updates the syntax highlighting language of a cache record.
+    pub fn update_cache_language(&self, id: &str, language: Option<&str>) -> SqlResult<bool> {
+        let affected = self.conn.execute(
+            "UPDATE caches SET language = ?1 WHERE id = ?2",
+            params![language, id],
+        )?;
+        Ok(affected > 0)
+    }
+
     /// toggle_pin toggles the pinned state of a cache record.
     pub fn toggle_pin(&self, id: &str) -> SqlResult<bool> {
         let current_pinned: i32 = self.conn.query_row(
@@ -342,7 +376,7 @@ impl Database {
 
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT c.id, c.cache_type, c.content, c.html_content, c.image_data_url,
-                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at
+                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language
              FROM caches c
              LEFT JOIN cache_tags ct ON c.id = ct.cache_id
              WHERE LOWER(c.content) LIKE ?1 OR LOWER(ct.tag) LIKE ?1
@@ -364,6 +398,7 @@ impl Database {
                 tags: Vec::new(),
                 pinned: row.get::<_, i32>(8)? != 0,
                 pinned_at: row.get(9)?,
+                language: row.get(10)?,
             })
         })?;
 
@@ -498,6 +533,9 @@ impl Database {
                 if let Some(ref h) = c.image_hash {
                     obj["image_hash"] = serde_json::Value::String(h.clone());
                 }
+                if let Some(ref l) = c.language {
+                    obj["language"] = serde_json::Value::String(l.clone());
+                }
                 obj
             }).collect::<Vec<_>>()
         });
@@ -601,6 +639,10 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
         pinned_at: rec.get("pinned_at").and_then(|v| v.as_i64()),
+        language: rec
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     }
 }
 

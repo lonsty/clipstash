@@ -64,10 +64,10 @@ export async function saveTheme(theme) {
 // ===== Cache CRUD =====
 
 /**
- * getCaches retrieves all cached records
- * @returns {Promise<Array>} cache list, pinned first, then by createdAt desc
+ * getCaches retrieves all cache records from storage
+ * @returns {Promise<Array>}
  */
-export async function getCaches() {
+async function getCaches() {
   const data = await chrome.storage.local.get(STORAGE_KEY);
   return data[STORAGE_KEY] || [];
 }
@@ -210,6 +210,37 @@ export async function togglePin(id) {
   return item.pinned;
 }
 
+/**
+ * updateCacheContent updates the text content of a cache record
+ * @param {string} id
+ * @param {string} content
+ * @returns {Promise<boolean>}
+ */
+export async function updateCacheContent(id, content) {
+  const caches = await getCaches();
+  const item = caches.find(c => c.id === id);
+  if (!item) return false;
+  item.content = content;
+  item.contentLength = [...content].length;
+  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+  return true;
+}
+
+/**
+ * updateCacheLanguage updates the syntax language of a cache record
+ * @param {string} id
+ * @param {string|null} language
+ * @returns {Promise<boolean>}
+ */
+export async function updateCacheLanguage(id, language) {
+  const caches = await getCaches();
+  const item = caches.find(c => c.id === id);
+  if (!item) return false;
+  item.language = language || null;
+  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+  return true;
+}
+
 // ===== Search =====
 
 /**
@@ -295,6 +326,7 @@ function toSnakeRecord(rec) {
   if (rec.htmlContent) out.html_content = rec.htmlContent;
   if (rec.imageDataUrl) out.image_data_url = rec.imageDataUrl;
   if (rec.imageHash) out.image_hash = rec.imageHash;
+  if (rec.language) out.language = rec.language;
   return out;
 }
 
@@ -318,6 +350,7 @@ function fromSnakeRecord(rec) {
   if (rec.html_content) out.htmlContent = rec.html_content;
   if (rec.image_data_url) out.imageDataUrl = rec.image_data_url;
   if (rec.image_hash) out.imageHash = rec.image_hash;
+  if (rec.language) out.language = rec.language;
   return out;
 }
 

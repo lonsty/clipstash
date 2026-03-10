@@ -4,6 +4,29 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.2] - 2026-03-10
+
+### 新增
+
+- **语法高亮** — 代码块使用 highlight.js 渲染，支持 30 种语言，适配浅色/深色主题
+- **内容编辑** — 在详情弹窗中直接编辑文本内容
+- **语言选择器** — 为每条缓存选择语法高亮语言
+- **详情弹窗重构** — 顶部显示元信息，操作按钮（全屏、关闭）移至顶栏；底部显示复制和编辑按钮
+- **设置页 About 区块** — 显示版本信息和 GitHub 链接
+- **右键菜单** — 扩展图标右键菜单增加"设置"入口
+
+### 修复
+
+- **语法高亮不生效** — 构建脚本遗漏 `vendor/` 目录，导致 highlight.js 文件缺失
+
+### 变更
+
+- **右键菜单精简** — 移除"缓存剪切板"和"打开 ClipStash"菜单项
+- **标签展示** — 标签文本超长时截断并显示 tooltip；无标签时隐藏标签区域
+- **卡片代码预览** — 代码类型卡片显示语法高亮预览及语言标识
+- **导入导出** — 数据中包含 `language` 字段
+- **代码清理** — 移除未使用的国际化键值和冗余兜底代码
+
 ## [0.1.0] - 2026-03-03
 
 ### 新增
@@ -35,4 +58,5 @@
 - **Manifest V3** — 支持 Chrome 104+
 - **零依赖** — 纯前端实现，零运行时依赖，零网络请求
 
-[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/ext/v0.1.0
+[0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
+[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

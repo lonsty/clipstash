@@ -1,8 +1,9 @@
 // ClipStash Desktop - Main interaction logic
 
 import {
-  getCaches, addCache, removeCache, clearAllCaches, updateCacheTags,
-  togglePin, searchCaches, getAllTags, getStorageStats,
+  addCache, removeCache, clearAllCaches, updateCacheTags,
+  togglePin, updateCacheContent, updateCacheLanguage,
+  searchCaches, getAllTags, getStorageStats,
   getSettings, saveSettings, getTheme, saveTheme,
   exportCaches, importCaches, formatBytes
 } from '../utils/storage.js';
@@ -14,8 +15,8 @@ import {
   writeTextFile, readTextFile,
   setAutostart, getAutostart,
   setClipboardMonitor, getClipboardMonitor,
-  registerHotkey, showNotification, openFullscreenWindow, openUrl,
-  setSuppressAutoHide,
+  registerHotkey, showNotification, openFullscreenWindow, openStickyWindow, openUrl,
+  setSuppressAutoHide, getAppVersion, updateTrayMenu,
 } from '../utils/bridge.js';
 
 const PAGE_SIZE = 12;
@@ -26,6 +27,7 @@ let displayedCount = 0;
 let isLoadingMore = false;
 let currentQuery = '';
 let currentModalData = null;
+let isEditMode = false;
 let confirmCallback = null;
 let currentSettings = null;
 
@@ -44,6 +46,7 @@ const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
 const modalHtmlWrap = document.getElementById('modal-html-wrap');
 const modalMeta = document.getElementById('modal-meta');
+const modalTagsSection = document.querySelector('.modal-tags-section');
 const modalTagsEl = document.getElementById('modal-tags');
 const btnAddTag = document.getElementById('btn-add-tag');
 const tagInputWrap = document.getElementById('tag-input-wrap');
@@ -52,6 +55,11 @@ const tagSuggestions = document.getElementById('tag-suggestions');
 const btnModalClose = document.getElementById('btn-modal-close');
 const btnModalCopy = document.getElementById('btn-modal-copy');
 const btnModalFullscreen = document.getElementById('btn-modal-fullscreen');
+const btnModalPin = document.getElementById('btn-modal-pin');
+const btnModalEdit = document.getElementById('btn-modal-edit');
+const modalLangSelect = document.getElementById('modal-lang-select');
+const modalEditor = document.getElementById('modal-editor');
+const modalCode = document.getElementById('modal-code');
 const btnClearAll = document.getElementById('btn-clear-all');
 const confirmOverlay = document.getElementById('confirm-overlay');
 const confirmTitleEl = document.getElementById('confirm-title');
@@ -79,6 +87,8 @@ const btnImport = document.getElementById('btn-import');
 const importStatus = document.getElementById('import-status');
 const btnCacheNow = document.getElementById('btn-cache-now');
 const btnGithub = document.getElementById('btn-github');
+const appVersionEl = document.getElementById('app-version');
+const aboutGithub = document.getElementById('about-github');
 
 // SVG icons
 const ICON_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
@@ -106,6 +116,26 @@ const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 </svg>`;
 
 // ===== Utility Functions =====
+
+function highlightCode(text, language) {
+  if (!language || typeof hljs === 'undefined') return escapeHtml(text);
+  try {
+    const result = hljs.highlight(text, { language, ignoreIllegals: true });
+    return result.value;
+  } catch {
+    return escapeHtml(text);
+  }
+}
+
+// Inline hljs theme CSS for standalone HTML pages
+const HLJS_LIGHT_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#24292e;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}.hljs-built_in,.hljs-symbol{color:#e36209}.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}.hljs-subst{color:#24292e}.hljs-section{color:#005cc5;font-weight:700}.hljs-bullet{color:#735c0f}.hljs-emphasis{color:#24292e;font-style:italic}.hljs-strong{color:#24292e;font-weight:700}.hljs-addition{color:#22863a;background-color:#f0fff4}.hljs-deletion{color:#b31d28;background-color:#ffeef0}`;
+const HLJS_DARK_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#c9d1d9;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#ff7b72}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#d2a8ff}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#79c0ff}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#a5d6ff}.hljs-built_in,.hljs-symbol{color:#ffa657}.hljs-code,.hljs-comment,.hljs-formula{color:#8b949e}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#7ee787}.hljs-subst{color:#c9d1d9}.hljs-section{color:#1f6feb;font-weight:700}.hljs-bullet{color:#f2cc60}.hljs-emphasis{color:#c9d1d9;font-style:italic}.hljs-strong{color:#c9d1d9;font-weight:700}.hljs-addition{color:#aff5b4;background-color:#033a16}.hljs-deletion{color:#ffdcd7;background-color:#67060c}`;
+
+function getHljsCss() {
+  const isDark = currentTheme === 'dark' ||
+    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return isDark ? HLJS_DARK_CSS : HLJS_LIGHT_CSS;
+}
 
 function truncateText(text) {
   const lines = text.split('\n');
@@ -146,6 +176,12 @@ let currentTheme = 'system';
 async function applyTheme(theme) {
   currentTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
+  const isDark = theme === 'dark' ||
+    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const hljsThemeEl = document.getElementById('hljs-theme');
+  if (hljsThemeEl) {
+    hljsThemeEl.href = isDark ? 'vendor/hljs-dark.css' : 'vendor/hljs-light.css';
+  }
 }
 
 // ===== i18n DOM binding =====
@@ -183,7 +219,14 @@ function hideConfirm() {
 function renderTagBadge(tagName, removable, onRemove) {
   const span = document.createElement('span');
   span.className = 'tag';
-  span.textContent = tagName;
+  span.title = tagName; // 添加 title 属性用于 hover 显示完整内容
+  
+  // 创建标签文本容器
+  const textSpan = document.createElement('span');
+  textSpan.className = 'tag-text';
+  textSpan.textContent = tagName;
+  span.appendChild(textSpan);
+  
   if (removable && onRemove) {
     const removeBtn = document.createElement('span');
     removeBtn.className = 'tag-remove';
@@ -199,23 +242,27 @@ function renderTagBadge(tagName, removable, onRemove) {
 
 function renderModalTags() {
   if (!currentModalData) return;
-  modalTagsEl.innerHTML = '';
   const tags = currentModalData.tags || [];
-  if (tags.length === 0) {
-    const hint = document.createElement('span');
-    hint.style.cssText = 'font-size:11px;color:var(--text-muted);';
-    hint.textContent = t('noTags');
-    modalTagsEl.appendChild(hint);
-    return;
-  }
-  for (const tag of tags) {
-    modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
-      const newTags = currentModalData.tags.filter(x => x !== tg);
-      await updateCacheTags(currentModalData.id, newTags);
-      currentModalData.tags = newTags;
-      renderModalTags();
-      await refreshList();
-    }));
+  
+  modalTagsEl.innerHTML = '';
+  
+  // 有标签时显示标签容器
+  if (tags.length > 0) {
+    modalTagsEl.style.display = 'flex';
+    modalTagsSection.classList.remove('no-tags');
+    for (const tag of tags) {
+      modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
+        const newTags = currentModalData.tags.filter(x => x !== tg);
+        await updateCacheTags(currentModalData.id, newTags);
+        currentModalData.tags = newTags;
+        renderModalTags();
+        await refreshList();
+      }));
+    }
+  } else {
+    // 无标签时隐藏标签容器并添加样式类
+    modalTagsEl.style.display = 'none';
+    modalTagsSection.classList.add('no-tags');
   }
 }
 
@@ -272,7 +319,11 @@ function createCacheCard(item) {
     contentHtml = `<img class="cache-image-thumb" src="${item.imageDataUrl}" alt="${t('imageAlt')}">`;
   } else {
     const preview = truncateText(item.content || '');
-    contentHtml = `<div class="cache-text">${escapeHtml(preview)}</div>`;
+    if (item.language) {
+      contentHtml = `<pre class="cache-text"><code class="hljs">${highlightCode(preview, item.language)}</code></pre>`;
+    } else {
+      contentHtml = `<div class="cache-text">${escapeHtml(preview)}</div>`;
+    }
   }
 
   let typeBadge = '';
@@ -281,10 +332,13 @@ function createCacheCard(item) {
   } else if (type === 'html') {
     typeBadge = `<span class="cache-type-badge type-html">${t('typeHtml')}</span>`;
   }
+  if (item.language) {
+    typeBadge += `<span class="cache-lang-badge">${escapeHtml(item.language)}</span>`;
+  }
 
   let tagsHtml = '';
   if (tags.length > 0) {
-    tagsHtml = `<div class="cache-tags-row">${tags.map(tg => `<span class="tag">${escapeHtml(tg)}</span>`).join('')}</div>`;
+    tagsHtml = `<div class="cache-tags-row">${tags.map(tg => `<span class="tag" title="${escapeHtml(tg)}"><span class="tag-text">${escapeHtml(tg)}</span></span>`).join('')}</div>`;
   }
 
   const metaText = type === 'image'
@@ -467,11 +521,22 @@ function showCopyFeedback(btnEl) {
 
 function openModal(item) {
   currentModalData = item;
+  isEditMode = false;
   const type = item.type || 'text';
 
   modalContent.style.display = 'none';
   modalImageWrap.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
+  modalEditor.style.display = 'none';
+
+  // Reset edit button state
+  btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+  btnModalEdit.title = t('edit');
+
+  // Show/hide edit & language controls based on type
+  btnModalEdit.style.display = (type === 'image') ? 'none' : 'inline-flex';
+  modalLangSelect.style.display = (type === 'image' || type === 'html') ? 'none' : 'inline-flex';
+  modalLangSelect.value = item.language || '';
 
   if (type === 'image' && item.imageDataUrl) {
     modalImage.src = item.imageDataUrl;
@@ -481,11 +546,18 @@ function openModal(item) {
     modalHtmlWrap.innerHTML = item.htmlContent;
     modalHtmlWrap.style.display = 'block';
     if (item.content) {
-      modalContent.textContent = item.content;
+      modalCode.textContent = item.content;
+      modalCode.className = '';
       modalContent.style.display = 'block';
     }
   } else {
-    modalContent.textContent = item.content;
+    if (item.language) {
+      modalCode.innerHTML = highlightCode(item.content || '', item.language);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = item.content;
+      modalCode.className = '';
+    }
     modalContent.style.display = 'block';
   }
 
@@ -504,6 +576,8 @@ function openModal(item) {
 function closeModal() {
   modalOverlay.style.display = 'none';
   currentModalData = null;
+  isEditMode = false;
+  modalEditor.style.display = 'none';
   tagInputWrap.style.display = 'none';
   tagSuggestions.style.display = 'none';
 }
@@ -516,22 +590,76 @@ async function openFullscreen() {
     (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const bgColor = isDark ? '#1a1b1e' : '#ffffff';
   const textColor = isDark ? '#e4e5e7' : '#111827';
+  const btnBg = isDark ? '#25262b' : '#f1f5f9';
+  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
+  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
+  const successColor = '#22c55e';
   const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
 
   let bodyContent = '';
+  let copyDataScript = '';
+
   if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;">
+    bodyContent = `<div style="position:relative;margin:16px;padding:16px;min-height:calc(100vh - 32px);border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);display:flex;align-items:center;justify-content:center;">
+      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 64px);object-fit:contain;">
     </div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const img = document.querySelector('img');
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(async (blob) => {
+            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+            showCopyOk();
+          }, 'image/png');
+        } catch { showCopyOk(); }
+      }`;
+  // 富文本类型：渲染HTML内容
+  // 统一使用 margin:16px 和 padding:16px，与详情页 .modal-body 保持一致
   } else if (type === 'html' && item.htmlContent) {
-    bodyContent = `<div style="max-width:900px;margin:0 auto;padding:40px 24px;font-size:15px;line-height:1.8;">
+    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
       ${item.htmlContent}
     </div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const htmlStr = \`${escapedHtml}\`;
+          const textStr = \`${escapedText}\`;
+          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
+          const textBlob = new Blob([textStr], {type: 'text/plain'});
+          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
+          showCopyOk();
+        } catch {
+          await navigator.clipboard.writeText(\`${escapedText}\`);
+          showCopyOk();
+        }
+      }`;
   } else {
-    const escaped = escapeHtml(item.content || '');
-    bodyContent = `<pre style="max-width:900px;margin:0 auto;padding:40px 24px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;">${escaped}</pre>`;
+    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
+    const codeClass = item.language ? ' class="hljs"' : '';
+    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<pre style="margin:16px;padding:16px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);"><code${codeClass}>${escaped}</code></pre>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          await navigator.clipboard.writeText(\`${escapedForJs}\`);
+          showCopyOk();
+        } catch {}
+      }`;
   }
 
+  const copyBtnLabel = t('copy');
+  const copiedLabel = t('copied');
+
+  const hljsCssInline = item.language ? getHljsCss() : '';
+
+  // 生成完整的HTML页面用于全屏展示
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -541,15 +669,180 @@ async function openFullscreen() {
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
   img { display: block; }
+  /* 清除 code 和 code.hljs 的内边距，避免与 pre 的 padding 叠加 */
+  code { padding: 0 !important; background: transparent !important; display: block; }
+  code.hljs { padding: 0 !important; background: transparent !important; }
+  /* 工具栏固定在右上角，位于内容边框内部：margin(16px) + 12px = 28px */
+  .toolbar { position: fixed; top: 28px; right: 28px; z-index: 10; display: flex; gap: 8px; }
+  /* 复制按钮：默认半透明，hover和点击后完全显示 */
+  .copy-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: 1px solid ${btnBorder}; border-radius: 6px; background: ${btnBg}; color: ${textColor}; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.2s; opacity: 0.5; backdrop-filter: blur(8px); }
+  .copy-btn:hover { background: ${btnHover}; opacity: 1; }
+  .copy-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; opacity: 1; }
+  .copy-btn svg { width: 14px; height: 14px; }
+  ${hljsCssInline}
 </style>
 </head>
-<body>${bodyContent}</body>
+<body>
+<div class="toolbar">
+  <button class="copy-btn" onclick="doCopy()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+    <span id="copy-text">${copyBtnLabel}</span>
+  </button>
+</div>
+${bodyContent}
+<script>
+  function showCopyOk() {
+    const btn = document.querySelector('.copy-btn');
+    const txt = document.getElementById('copy-text');
+    btn.classList.add('copied');
+    txt.textContent = '${copiedLabel}';
+    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
+  }
+  ${copyDataScript}
+</script>
+</body>
 </html>`;
 
   try {
     await openFullscreenWindow(html);
   } catch {
-    // Fallback: use blob URL
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  }
+}
+
+// 打开便签窗口：创建一个始终在顶部的小窗口显示内容
+async function openStickyNote() {
+  if (!currentModalData) return;
+  const item = currentModalData;
+  const type = item.type || 'text';
+  const isDark = currentTheme === 'dark' ||
+    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const bgColor = isDark ? '#1a1b1e' : '#ffffff';
+  const textColor = isDark ? '#e4e5e7' : '#111827';
+  const btnBg = isDark ? '#25262b' : '#f1f5f9';
+  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
+  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
+  const successColor = '#22c55e';
+  const mutedColor = isDark ? '#6b6c70' : '#9ca3af';
+  const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
+
+  let bodyContent = '';
+  let copyDataScript = '';
+
+  // 图片类型：flexbox居中展示
+  if (type === 'image' && item.imageDataUrl) {
+    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;flex:1;padding:8px;">
+      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 44px);object-fit:contain;">
+    </div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const img = document.querySelector('img');
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob(async (blob) => {
+            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+            showCopyOk();
+          }, 'image/png');
+        } catch { showCopyOk(); }
+      }`;
+  // 富文本类型：渲染HTML内容，紧凑布局
+  } else if (type === 'html' && item.htmlContent) {
+    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<div class="sticky-body" style="font-size:13px;line-height:1.6;">${item.htmlContent}</div>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          const htmlStr = \`${escapedHtml}\`;
+          const textStr = \`${escapedText}\`;
+          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
+          const textBlob = new Blob([textStr], {type: 'text/plain'});
+          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
+          showCopyOk();
+        } catch {
+          await navigator.clipboard.writeText(\`${escapedText}\`);
+          showCopyOk();
+        }
+      }`;
+  // 文本/代码类型：使用 pre+code 展示，支持语法高亮
+  } else {
+    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
+    const codeClass = item.language ? ' class="hljs"' : '';
+    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    bodyContent = `<pre class="sticky-body" style="font-family:${fontMono};font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;"><code${codeClass}>${escaped}</code></pre>`;
+    copyDataScript = `
+      async function doCopy() {
+        try {
+          await navigator.clipboard.writeText(\`${escapedForJs}\`);
+          showCopyOk();
+        } catch {}
+      }`;
+  }
+
+  const copyBtnLabel = t('copy');
+  const copiedLabel = t('copied');
+  const pinLabel = t('pinToTop');
+  const hljsCssStickyInline = item.language ? getHljsCss() : '';
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ClipStash - ${pinLabel}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  img { display: block; }
+  .sticky-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid ${btnBorder}; flex-shrink: 0; -webkit-app-region: drag; }
+  .sticky-title { font-size: 11px; color: ${mutedColor}; display: flex; align-items: center; gap: 4px; }
+  .sticky-title svg { color: #f59e0b; }
+  .sticky-actions { display: flex; gap: 4px; -webkit-app-region: no-drag; }
+  .sticky-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 8px; border: 1px solid ${btnBorder}; border-radius: 4px; background: ${btnBg}; color: ${textColor}; font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
+  .sticky-btn:hover { background: ${btnHover}; }
+  .sticky-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; }
+  .sticky-btn svg { width: 12px; height: 12px; }
+  .sticky-body { flex: 1; overflow: auto; padding: 10px 12px; }
+  .sticky-body img { max-width: 100%; }
+  ${hljsCssStickyInline}
+</style>
+</head>
+<body>
+<div class="sticky-header">
+  <div class="sticky-title">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><path d="M15 3v5a1 1 0 0 0 1 1h5"/></svg>
+    ${pinLabel}
+  </div>
+  <div class="sticky-actions">
+    <button class="sticky-btn" onclick="doCopy()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span id="copy-text">${copyBtnLabel}</span>
+    </button>
+  </div>
+</div>
+${bodyContent}
+<script>
+  function showCopyOk() {
+    const btn = document.querySelector('.sticky-btn');
+    const txt = document.getElementById('copy-text');
+    btn.classList.add('copied');
+    txt.textContent = '${copiedLabel}';
+    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
+  }
+  ${copyDataScript}
+</script>
+</body>
+</html>`;
+
+  try {
+    await openStickyWindow(html);
+    closeModal();
+  } catch {
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
@@ -774,6 +1067,71 @@ btnModalCopy.addEventListener('click', () => {
   copyToClipboard(currentModalData, btnModalCopy);
 });
 btnModalFullscreen.addEventListener('click', openFullscreen);
+btnModalPin.addEventListener('click', openStickyNote);
+
+// Language selector
+modalLangSelect.addEventListener('change', async () => {
+  if (!currentModalData) return;
+  const lang = modalLangSelect.value || null;
+  await updateCacheLanguage(currentModalData.id, lang);
+  currentModalData.language = lang;
+  // Re-render highlighted content
+  if (currentModalData.type !== 'image' && currentModalData.type !== 'html') {
+    if (lang) {
+      modalCode.innerHTML = highlightCode(currentModalData.content || '', lang);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = currentModalData.content;
+      modalCode.className = '';
+    }
+  }
+  await refreshList();
+});
+
+// Edit mode toggle
+btnModalEdit.addEventListener('click', async () => {
+  if (!currentModalData) return;
+
+  if (!isEditMode) {
+    // Enter edit mode
+    isEditMode = true;
+    modalEditor.value = currentModalData.content || '';
+    modalContent.style.display = 'none';
+    modalHtmlWrap.style.display = 'none';
+    modalEditor.style.display = 'block';
+    modalEditor.focus();
+    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
+    btnModalEdit.title = t('save');
+  } else {
+    // Save and exit edit mode
+    const newContent = modalEditor.value;
+    await updateCacheContent(currentModalData.id, newContent);
+    currentModalData.content = newContent;
+    currentModalData.contentLength = [...newContent].length;
+    isEditMode = false;
+    modalEditor.style.display = 'none';
+
+    // Re-render content with highlighting
+    const lang = currentModalData.language;
+    if (lang) {
+      modalCode.innerHTML = highlightCode(newContent, lang);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = newContent;
+      modalCode.className = '';
+    }
+    modalContent.style.display = 'block';
+
+    // Update meta
+    const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
+    modalMeta.textContent = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
+
+    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    btnModalEdit.title = t('edit');
+
+    await refreshList();
+  }
+});
 
 // Tag input
 btnAddTag.addEventListener('click', () => {
@@ -842,6 +1200,16 @@ btnGithub.addEventListener('click', async (e) => {
   }
 });
 
+// About GitHub link in settings
+aboutGithub.addEventListener('click', async (e) => {
+  e.preventDefault();
+  try {
+    await openUrl('https://github.com/lonsty/clipstash');
+  } catch {
+    window.open('https://github.com/lonsty/clipstash', '_blank');
+  }
+});
+
 // Settings
 btnSettings.addEventListener('click', async () => {
   currentSettings = await getSettings();
@@ -867,6 +1235,13 @@ btnSettings.addEventListener('click', async () => {
 
   importStatus.style.display = 'none';
   shortcutRecording.style.display = 'none';
+
+  // Show app version
+  const version = await getAppVersion();
+  if (version) {
+    appVersionEl.textContent = `v${version}`;
+  }
+
   settingsOverlay.style.display = 'flex';
 });
 
@@ -901,6 +1276,7 @@ langBtnsEl.addEventListener('click', async (e) => {
     await saveSettings(currentSettings);
   }
   applyI18n();
+  await updateTrayMenu(t('traySettings'), t('trayQuit')).catch(() => {});
   await refreshList();
 });
 
@@ -1033,6 +1409,9 @@ async function init() {
   // Load language
   initLang(currentSettings.language || 'en');
   applyI18n();
+  
+  // Update tray menu with current language
+  await updateTrayMenu(t('traySettings'), t('trayQuit')).catch(() => {});
 
   // Load and apply theme
   const theme = await getTheme();

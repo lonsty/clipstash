@@ -1,12 +1,13 @@
 // ClipStash Desktop - Storage utility (wraps Tauri backend calls)
 
 import {
-  getCaches as bridgeGetCaches,
   addCache as bridgeAddCache,
   removeCache as bridgeRemoveCache,
   clearAllCaches as bridgeClearAll,
   updateCacheTags as bridgeUpdateTags,
   togglePin as bridgeTogglePin,
+  updateCacheContent as bridgeUpdateCacheContent,
+  updateCacheLanguage as bridgeUpdateCacheLanguage,
   searchCaches as bridgeSearchCaches,
   getAllTags as bridgeGetAllTags,
   getStorageStats as bridgeGetStorageStats,
@@ -60,10 +61,6 @@ export async function saveTheme(theme) {
 
 // ===== Cache CRUD =====
 
-export async function getCaches(offset, limit) {
-  return await bridgeGetCaches(offset, limit);
-}
-
 export async function addCache(data) {
   const type = data.type || 'text';
   const content = data.content || '';
@@ -108,6 +105,14 @@ export async function updateCacheTags(id, tags) {
 
 export async function togglePin(id) {
   return await bridgeTogglePin(id);
+}
+
+export async function updateCacheContent(id, content) {
+  return await bridgeUpdateCacheContent(id, content);
+}
+
+export async function updateCacheLanguage(id, language) {
+  return await bridgeUpdateCacheLanguage(id, language);
 }
 
 // ===== Search =====

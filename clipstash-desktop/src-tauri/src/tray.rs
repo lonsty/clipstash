@@ -6,18 +6,13 @@ use tauri::{
 
 /// setup_tray creates and configures the system tray icon and menu.
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let cache_clipboard =
-        MenuItem::with_id(app, "cache_clipboard", "Cache clipboard", true, None::<&str>)?;
-    let open_clipstash =
-        MenuItem::with_id(app, "open_clipstash", "Open ClipStash", true, None::<&str>)?;
     let open_settings =
-        MenuItem::with_id(app, "open_settings", "Settings...", true, None::<&str>)?;
-    let separator = MenuItem::with_id(app, "sep", "─────────", false, None::<&str>)?;
+        MenuItem::with_id(app, "open_settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
-        &[&cache_clipboard, &open_clipstash, &open_settings, &separator, &quit],
+        &[&open_settings, &quit],
     )?;
 
     // Always build our own tray so we can control show_menu_on_left_click.
@@ -41,7 +36,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
-                    if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
                         window.hide().ok();
                     } else {
@@ -115,15 +110,6 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "cache_clipboard" => {
-                app.emit("tray-cache-clipboard", ()).ok();
-            }
-            "open_clipstash" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.show().ok();
-                    window.set_focus().ok();
-                }
-            }
             "open_settings" => {
                 if let Some(window) = app.get_webview_window("main") {
                     window.show().ok();

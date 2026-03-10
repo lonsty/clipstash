@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-10
+
+### Added
+
+- **Syntax highlighting** — code blocks rendered with highlight.js, supporting 30 languages with light/dark themes
+- **Inline editing** — edit text content directly in the detail modal
+- **Language selector** — choose syntax highlighting language per cache item
+- **Detail modal redesign** — header shows metadata, action buttons (fullscreen, close) moved to header; footer shows copy and edit buttons
+- **Settings About section** — version info and GitHub link in settings panel
+- **Right-click context menu** — "Settings" entry on extension icon context menu
+
+### Fixed
+
+- **Highlight.js not loading** — vendor files were missing from build output; added `vendor/` to build script copy list
+
+### Changed
+
+- **Context menu simplified** — removed "Cache clipboard" and "Open ClipStash" context menu items
+- **Tags display** — tags now show with text truncation and tooltip; hidden when empty
+- **Card code preview** — code cards show syntax-highlighted preview with language badge
+- **Import/export** — `language` field included in data portability
+- **Code cleanup** — removed unused i18n keys and redundant fallback code
+
 ## [0.1.0] - 2026-03-03
 
 ### Added
@@ -36,4 +59,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Manifest V3** — supports Chrome 104+
 - **Zero dependencies** — pure frontend, no runtime dependencies, no network requests
 
-[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/ext/v0.1.0
+[0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
+[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

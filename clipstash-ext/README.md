@@ -32,6 +32,7 @@
 | Clipboard caching | Cache clipboard content on click; supports text, images, HTML rich text |
 | Quick copy | One-click copy with "Copied ✓" feedback |
 | Fullscreen view | View long text and images in fullscreen modal |
+| Syntax highlighting | Code blocks highlighted with 30 language support |
 | Tags | Add custom tags to each item, search by tags |
 | Search | Real-time search by content and tags, Ctrl/Cmd+F shortcut |
 | Pin | Pin frequently used items to the top |
@@ -125,6 +126,10 @@ clipstash-ext/
 │   ├── clipboard.js           # Clipboard wrapper
 │   ├── time.js                # Relative time formatting
 │   └── i18n.js                # i18n (EN / 中文)
+├── vendor/
+│   ├── highlight.min.js       # Syntax highlighting engine
+│   ├── hljs-light.css         # Light theme for highlight.js
+│   └── hljs-dark.css          # Dark theme for highlight.js
 ├── icons/                     # Icons (16/48/128px)
 ├── scripts/
 │   ├── build.js               # Build script

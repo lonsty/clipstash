@@ -4,6 +4,28 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.2] - 2026-03-10
+
+### 新增
+
+- **语法高亮** — 代码块使用 highlight.js 渲染，支持 30 种语言，适配浅色/深色主题
+- **内容编辑** — 在详情弹窗中直接编辑文本内容
+- **语言选择器** — 为每条缓存选择语法高亮语言，存储至 SQLite
+- **便签窗口** — 将缓存内容以常驻置顶窗口方式打开
+- **详情弹窗重构** — 顶部显示元信息及全屏、置顶、关闭按钮；底部显示复制和编辑按钮
+- **设置页 About 区块** — 显示版本信息和 GitHub 链接
+- **托盘菜单动态更新** — 切换语言时托盘右键菜单文本同步更新
+
+### 变更
+
+- **托盘菜单精简** — 移除"缓存剪切板""打开 ClipStash"和分隔线；仅保留"设置"和"退出"
+- **数据库迁移** — 自动为旧数据库添加 `language` 列
+- **全屏查看** — 重构为卡片式布局，所有内容类型（文本、图片、富文本）均支持复制按钮
+- **标签展示** — 标签文本超长时截断并显示 tooltip；无标签时隐藏标签区域
+- **卡片代码预览** — 代码类型卡片显示语法高亮预览及语言标识
+- **导入导出** — 数据中包含 `language` 字段
+- **代码清理** — 移除未使用的国际化键值、未使用的 `getCaches` 封装函数和未使用的 `BaseDirectory` 导出
+
 ## [0.1.1] - 2026-03-10
 
 ### 修复
@@ -44,5 +66,6 @@
 - **跨平台** — macOS (.app / .dmg)、Windows (.exe)、Linux (.deb / .AppImage)
 - **隐私** — 零网络请求，数据本地存储
 
+[0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1
-[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/desktop/v0.1.0
+[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

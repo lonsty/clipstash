@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-10
+
+### Added
+
+- **Syntax highlighting** — code blocks rendered with highlight.js, supporting 30 languages with light/dark themes
+- **Inline editing** — edit text content directly in the detail modal
+- **Language selector** — choose syntax highlighting language per cache item, stored in SQLite
+- **Sticky note window** — open cache content as an always-on-top floating window
+- **Detail modal redesign** — header shows metadata with fullscreen, pin, and close buttons; footer shows copy and edit buttons
+- **Settings About section** — version info and GitHub link in settings panel
+- **Dynamic tray menu** — tray context menu updates text on language switch
+
+### Changed
+
+- **Tray menu simplified** — removed "Cache clipboard", "Open ClipStash", separator; kept "Settings" and "Quit"
+- **Database migration** — auto-add `language` column for existing databases
+- **Fullscreen view** — redesigned with card-style layout and copy button for all content types (text, image, HTML)
+- **Tags display** — tags now show with text truncation and tooltip; hidden when empty
+- **Card code preview** — code cards show syntax-highlighted preview with language badge
+- **Import/export** — `language` field included in data portability
+- **Code cleanup** — removed unused i18n keys, unused `getCaches` wrapper, and unused `BaseDirectory` export
+
 ## [0.1.1] - 2026-03-10
 
 ### Fixed
@@ -45,5 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-platform** — macOS (.app / .dmg), Windows (.exe), Linux (.deb / .AppImage)
 - **Privacy** — zero network requests, all data stored locally
 
+[0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1
-[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/desktop/v0.1.0
+[0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

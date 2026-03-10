@@ -4,8 +4,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open, save } = window.__TAURI__.dialog;
-const { writeTextFile, readTextFile, BaseDirectory } = window.__TAURI__.fs;
-const { sendNotification } = window.__TAURI__.notification;
+const { writeTextFile, readTextFile } = window.__TAURI__.fs;
 const { open: openUrl } = window.__TAURI__.shell;
 
 // ===== Clipboard =====
@@ -59,6 +58,14 @@ export async function updateCacheTags(id, tags) {
 
 export async function togglePin(id) {
   return await invoke('toggle_pin', { id });
+}
+
+export async function updateCacheContent(id, content) {
+  return await invoke('update_cache_content', { id, content });
+}
+
+export async function updateCacheLanguage(id, language) {
+  return await invoke('update_cache_language', { id, language: language || null });
 }
 
 export async function searchCaches(query, offset = 0, limit = 1000) {
@@ -123,6 +130,28 @@ export async function openFullscreenWindow(htmlContent) {
   return await invoke('open_fullscreen_window', { htmlContent });
 }
 
+export async function openStickyWindow(htmlContent) {
+  return await invoke('open_sticky_window', { htmlContent });
+}
+
+// ===== App Info =====
+
+export async function getAppVersion() {
+  try {
+    const { getVersion } = window.__TAURI__.app;
+    return await getVersion();
+  } catch {
+    return '';
+  }
+}
+
+export async function updateTrayMenu(settingsText, quitText) {
+  return await invoke('update_tray_menu', {
+    settingsText,
+    quitText,
+  });
+}
+
 // ===== Events =====
 
 export async function onEvent(eventName, callback) {
@@ -153,4 +182,4 @@ export async function showOpenDialog() {
   });
 }
 
-export { writeTextFile, readTextFile, BaseDirectory, openUrl };
+export { writeTextFile, readTextFile, openUrl };

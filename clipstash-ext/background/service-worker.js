@@ -32,6 +32,19 @@ async function openPopup() {
   }, 500);
 }
 
+/**
+ * openPopupWithAction opens the popup and sends an action message to it
+ * @param {string} action
+ */
+async function openPopupWithAction(action) {
+  await chrome.action.setPopup({ popup: 'popup/popup.html' });
+  await chrome.action.openPopup();
+  setTimeout(async () => {
+    await chrome.action.setPopup({ popup: '' });
+    chrome.runtime.sendMessage({ action });
+  }, 300);
+}
+
 // ===== Clipboard Cache =====
 
 /**
@@ -81,23 +94,15 @@ async function cacheClipboard(tab) {
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
-    id: 'cache-clipboard',
-    title: 'Cache clipboard',
-    contexts: ['action']
-  });
-  chrome.contextMenus.create({
-    id: 'open-clipstash',
-    title: 'Open ClipStash',
+    id: 'open-settings',
+    title: 'Settings',
     contexts: ['action']
   });
 });
 
 chrome.contextMenus.onClicked.addListener(async (info) => {
-  if (info.menuItemId === 'cache-clipboard') {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    await cacheClipboard(tab);
-  } else if (info.menuItemId === 'open-clipstash') {
-    await openPopup();
+  if (info.menuItemId === 'open-settings') {
+    await openPopupWithAction('open-settings');
   }
 });
 

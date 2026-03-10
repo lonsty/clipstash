@@ -86,8 +86,8 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
-                    // When a fullscreen window is closed, restore auto-hide behavior
-                    if window.label().starts_with("fullscreen_") {
+                    // When a fullscreen or sticky window is closed, restore auto-hide behavior
+                    if window.label().starts_with("fullscreen_") || window.label().starts_with("sticky_") {
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
                             if let Ok(mut flag) = state.suppress_auto_hide.lock() {
                                 *flag = false;
@@ -112,6 +112,8 @@ pub fn run() {
             commands::clear_all_caches,
             commands::update_cache_tags,
             commands::toggle_pin,
+            commands::update_cache_content,
+            commands::update_cache_language,
             commands::search_caches,
             commands::get_all_tags,
             commands::get_storage_stats,
@@ -126,7 +128,9 @@ pub fn run() {
             commands::register_hotkey,
             commands::show_notification,
             commands::open_fullscreen_window,
+            commands::open_sticky_window,
             commands::set_suppress_auto_hide,
+            commands::update_tray_menu,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
