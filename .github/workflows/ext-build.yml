@@ -51,4 +51,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: clipstash-zip
-          path: clipstash-ext/clipstash-*.zip
+          path: clipstash-ext/clipstash-chrome-extension-*.zip

@@ -36,5 +36,5 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: clipstash-ext/clipstash-*.zip
+          files: clipstash-ext/clipstash-chrome-extension-*.zip
           generate_release_notes: true

@@ -211,21 +211,28 @@ pub fn show_notification(app: tauri::AppHandle, title: String, body: String) -> 
 #[tauri::command]
 pub fn open_fullscreen_window(
     app: tauri::AppHandle,
+    state: State<AppState>,
     html_content: String,
 ) -> Result<bool, String> {
     let label = format!("fullscreen_{}", db::generate_id());
 
-    // Write HTML to a temp file in app data dir
+    // Write HTML to a temp file and use a proper file:// URL
     let temp_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
     let temp_file = temp_dir.join(format!("{}.html", &label));
     std::fs::write(&temp_file, &html_content).map_err(|e| e.to_string())?;
 
-    // Use file:// URL so the webview can load it directly
-    let file_url = format!("file://{}", temp_file.to_str().unwrap_or(""));
-    let url = file_url.parse().map_err(|_| "invalid file URL".to_string())?;
+    // Use url::Url::from_file_path for correct cross-platform file:// URLs
+    // (e.g. file:///C:/... on Windows, file:///Users/... on macOS)
+    let file_url = tauri::Url::from_file_path(&temp_file)
+        .map_err(|_| "failed to create file URL".to_string())?;
 
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+    // Suppress auto-hide so the main window stays visible while fullscreen is open
+    if let Ok(mut flag) = state.suppress_auto_hide.lock() {
+        *flag = true;
+    }
+
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(file_url))
         .title("ClipStash - Fullscreen")
         .inner_size(900.0, 700.0)
         .center()

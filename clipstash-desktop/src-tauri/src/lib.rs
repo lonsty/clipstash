@@ -73,15 +73,30 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Focused(false) => {
                     // Hide main window on focus loss (popover behavior),
-                    // unless auto-hide is suppressed (e.g. during file dialog).
+                    // unless auto-hide is suppressed (e.g. during file dialog or fullscreen window).
                     if window.label() == "main" {
-                        let dominated = window
+                        let suppressed = window
                             .app_handle()
                             .try_state::<AppState>()
                             .map(|s| *s.suppress_auto_hide.lock().unwrap())
                             .unwrap_or(false);
-                        if !dominated {
+                        if !suppressed {
                             window.hide().ok();
+                        }
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    // When a fullscreen window is closed, restore auto-hide behavior
+                    if window.label().starts_with("fullscreen_") {
+                        if let Some(state) = window.app_handle().try_state::<AppState>() {
+                            if let Ok(mut flag) = state.suppress_auto_hide.lock() {
+                                *flag = false;
+                            }
+                        }
+                        // Clean up the temp HTML file
+                        if let Ok(temp_dir) = window.app_handle().path().app_data_dir() {
+                            let temp_file = temp_dir.join(format!("{}.html", window.label()));
+                            std::fs::remove_file(temp_file).ok();
                         }
                     }
                 }

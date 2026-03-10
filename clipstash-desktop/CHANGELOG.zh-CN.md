@@ -4,6 +4,19 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.1] - 2026-03-10
+
+### 修复
+
+- **Windows 窗口方向** — 根据任务栏位置智能判断展开方向（任务栏在底部时向上展开）
+- **Windows 全屏查看空白** — 使用跨平台正确的 `file:///` URL 格式加载全屏 HTML 窗口
+- **全屏后界面无响应** — 全屏窗口打开期间抑制主窗口自动隐藏，关闭后恢复
+- **临时文件清理** — 全屏窗口关闭时自动清理临时 HTML 文件
+
+### 变更
+
+- **Chrome 扩展包命名** — 从 `clipstash-v*.zip` 改为 `clipstash-chrome-extension-v*.zip`，便于区分平台
+
 ## [0.1.0] - 2026-03-03
 
 ### 新增
@@ -31,4 +44,5 @@
 - **跨平台** — macOS (.app / .dmg)、Windows (.exe)、Linux (.deb / .AppImage)
 - **隐私** — 零网络请求，数据本地存储
 
+[0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/desktop/v0.1.0

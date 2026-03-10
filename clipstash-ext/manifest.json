@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipStash",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Clipboard cache — stash clipboard content with one click, revisit anytime",
   "permissions": [
     "activeTab",

@@ -81,7 +81,7 @@ console.log(`Total size: ${(totalSize / 1024).toFixed(1)} KB`);
 
 if (ZIP_FLAG) {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  const zipName = `clipstash-v${pkg.version}.zip`;
+  const zipName = `clipstash-chrome-extension-v${pkg.version}.zip`;
   const zipPath = path.join(ROOT, zipName);
   if (createZip(DIST, zipPath)) {
     const zipSize = fs.statSync(zipPath).size;
