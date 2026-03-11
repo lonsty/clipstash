@@ -1,9 +1,11 @@
 // ClipStash - Storage utility for chrome.storage.local
 
-const STORAGE_KEY = 'clipstash-caches';
-const SETTINGS_KEY = 'clipstash-settings';
-const THEME_KEY = 'clipstash-theme';
-const DEFAULT_MAX_CACHE_SIZE = 100;
+import {
+  STORAGE_KEY,
+  SETTINGS_KEY,
+  THEME_KEY,
+  DEFAULT_MAX_CACHE_SIZE
+} from './constants.js';
 
 /**
  * generateId generates a unique identifier
@@ -35,10 +37,15 @@ export async function getSettings() {
  * @returns {Promise<void>}
  */
 export async function saveSettings(settings) {
-  const current = await getSettings();
-  await chrome.storage.local.set({
-    [SETTINGS_KEY]: { ...current, ...settings }
-  });
+  try {
+    const current = await getSettings();
+    await chrome.storage.local.set({
+      [SETTINGS_KEY]: { ...current, ...settings }
+    });
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    throw error;
+  }
 }
 
 // ===== Theme =====
@@ -67,9 +74,14 @@ export async function saveTheme(theme) {
  * getCaches retrieves all cache records from storage
  * @returns {Promise<Array>}
  */
-async function getCaches() {
-  const data = await chrome.storage.local.get(STORAGE_KEY);
-  return data[STORAGE_KEY] || [];
+export async function getCaches() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    return data[STORAGE_KEY] || [];
+  } catch (error) {
+    console.error('Failed to get caches:', error);
+    return [];
+  }
 }
 
 /**
@@ -249,14 +261,19 @@ export async function updateCacheLanguage(id, language) {
  * @returns {Promise<Array>}
  */
 export async function searchCaches(query) {
-  const caches = await getCaches();
-  if (!query || !query.trim()) return caches;
-  const q = query.toLowerCase().trim();
-  return caches.filter(item => {
-    if (item.content && item.content.toLowerCase().includes(q)) return true;
-    if (item.tags && item.tags.some(tag => tag.toLowerCase().includes(q))) return true;
-    return false;
-  });
+  try {
+    const caches = await getCaches();
+    if (!query || !query.trim()) return caches;
+    const q = query.toLowerCase().trim();
+    return caches.filter(item => {
+      if (item.content && item.content.toLowerCase().includes(q)) return true;
+      if (item.tags && item.tags.some(tag => tag.toLowerCase().includes(q))) return true;
+      return false;
+    });
+  } catch (error) {
+    console.error('Failed to search caches:', error);
+    return [];
+  }
 }
 
 /**

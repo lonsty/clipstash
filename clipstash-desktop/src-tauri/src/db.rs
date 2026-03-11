@@ -372,7 +372,13 @@ impl Database {
             return self.get_caches(offset, limit);
         }
 
-        let pattern = format!("%{}%", query.to_lowercase());
+        // Escape LIKE special characters to prevent SQL injection
+        let escaped = query
+            .to_lowercase()
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
 
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT c.id, c.cache_type, c.content, c.html_content, c.image_data_url,

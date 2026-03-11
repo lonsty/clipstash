@@ -9,8 +9,18 @@ import {
 } from '../utils/storage.js';
 import { formatRelativeTime, formatFullTime } from '../utils/time.js';
 import { initLang, setLang, getLang, t } from '../utils/i18n.js';
-
-const PAGE_SIZE = 12;
+import {
+  PAGE_SIZE,
+  MAX_TAG_LENGTH,
+  MAX_TAG_SUGGESTIONS,
+  PREVIEW_MAX_LINES,
+  PREVIEW_MAX_LINE_LENGTH,
+  SEARCH_DEBOUNCE_DELAY,
+  FEEDBACK_DISPLAY_DURATION,
+  THEME_SYSTEM,
+  THEME_LIGHT,
+  THEME_DARK
+} from '../utils/constants.js';
 
 // State
 let allFilteredCaches = [];
@@ -150,13 +160,13 @@ function estimateDataUrlBytes(dataUrl) {
 
 // ===== Theme =====
 
-let currentTheme = 'system';
+let currentTheme = THEME_SYSTEM;
 
 async function applyTheme(theme) {
   currentTheme = theme;
   document.documentElement.setAttribute('data-theme', theme);
-  const isDark = theme === 'dark' ||
-    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = theme === THEME_DARK ||
+    (theme === THEME_SYSTEM && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const hljsThemeEl = document.getElementById('hljs-theme');
   if (hljsThemeEl) {
     hljsThemeEl.href = isDark ? '../vendor/hljs-dark.css' : '../vendor/hljs-light.css';
@@ -267,7 +277,7 @@ async function showTagSuggestions(value) {
 async function addTagToCurrentItem(tagName) {
   if (!currentModalData) return;
   const name = tagName.trim();
-  if (!name || name.length > 20) return;
+  if (!name || name.length > MAX_TAG_LENGTH) return;
   const tags = currentModalData.tags || [];
   if (tags.includes(name)) return;
   tags.push(name);
@@ -480,16 +490,20 @@ async function copyToClipboard(data, btnEl) {
     }
     showCopyFeedback(btnEl);
   } catch {
-    // Fallback: plain text copy
-    const text = data.content || data.imageDataUrl || '';
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
+    // Fallback: plain text copy using modern clipboard API
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Legacy fallback with execCommand (deprecated but still works)
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+    }
     showCopyFeedback(btnEl);
   }
 }
@@ -556,7 +570,13 @@ function openModal(item) {
     modalImage.alt = t('imageAlt');
     modalImageWrap.style.display = 'block';
   } else if (type === 'html' && item.htmlContent) {
-    modalHtmlWrap.innerHTML = item.htmlContent;
+    // Sanitize HTML content using DOMPurify if available, or display as text
+    if (typeof DOMPurify !== 'undefined') {
+      modalHtmlWrap.innerHTML = DOMPurify.sanitize(item.htmlContent);
+    } else {
+      // Fallback: display as escaped text if DOMPurify is not available
+      modalHtmlWrap.textContent = item.htmlContent;
+    }
     modalHtmlWrap.style.display = 'block';
     if (item.content) {
       modalCode.textContent = item.content;
@@ -634,8 +654,12 @@ function openFullscreen() {
   } else if (type === 'html' && item.htmlContent) {
     const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
     const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    // Sanitize HTML before inserting (for fullscreen view)
+    const sanitizedHtml = typeof DOMPurify !== 'undefined' 
+      ? DOMPurify.sanitize(item.htmlContent)
+      : escapeHtml(item.htmlContent);
     bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      ${item.htmlContent}
+      ${sanitizedHtml}
     </div>`;
     copyDataScript = `
       async function doCopy() {
@@ -720,7 +744,7 @@ const handleSearch = debounce(async (query) => {
   currentQuery = query;
   btnSearchClear.style.display = query.trim() ? 'inline-flex' : 'none';
   await refreshList();
-}, 250);
+}, SEARCH_DEBOUNCE_DELAY);
 
 // ===== Export / Import =====
 
@@ -979,7 +1003,7 @@ function showCacheNowFeedback(text, cls) {
     if (svgEl) svgEl.style.display = '';
     spanEl.textContent = t('cacheNow');
     btnCacheNow.classList.remove(cls);
-  }, 1500);
+  }, FEEDBACK_DISPLAY_DURATION);
 }
 
 // Settings

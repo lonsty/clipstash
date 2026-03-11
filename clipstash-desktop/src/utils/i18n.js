@@ -160,6 +160,9 @@ const MESSAGES = {
     notifCached: '剪切板内容已缓存',
     notifDuplicate: '该内容已缓存过',
     notifEmpty: '剪切板为空',
+    unsavedTitle: '放弃未保存的修改？',
+    unsavedDesc: '你有未保存的编辑内容，将会丢失。',
+    discardChanges: '放弃修改',
   }
 };
 

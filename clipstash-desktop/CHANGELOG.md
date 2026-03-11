@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3-alpha] - 2026-03-11
+
+> ⚠️ **Alpha Release**: This version contains experimental fixes that require further validation. Use with caution.
+
+### Security
+
+- **[CRITICAL] SQL injection fix** — escaped LIKE special characters (`\`, `%`, `_`) in `search_caches` function to prevent malicious query injection *(needs validation)*
+
+### Fixed
+
+- **Fullscreen view blank on Windows** — fixed JavaScript string escaping in HTML content generation (replaced template literals with properly escaped single quotes) *(needs validation)*
+- **Application freeze after fullscreen** — improved window lifecycle management with delayed show and focus to prevent race conditions *(needs validation)*
+- **Inline editor visual consistency** — editing mode now matches view mode layout with proper border spacing and consistent content positioning
+
+### Changed
+
+- **Inline editor design** — removed gradient background, added green border around editor with 4px spacing
+- **Editor height behavior** — dynamic height adjustment to match content size (min 80px, max 500px) instead of fixed 240px
+- **Error handling** — improved error logging for database operations
+- **Window initialization** — fullscreen and sticky windows now start hidden and show after content loads to prevent flashing
+
 ## [0.1.2] - 2026-03-10
 
 ### Added

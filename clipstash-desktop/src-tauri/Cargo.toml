@@ -1,6 +1,6 @@
 [package]
 name = "clipstash-desktop"
-version = "0.1.2"
+version = "0.1.3-alpha"
 description = "ClipStash Desktop - Cross-platform clipboard cache manager"
 authors = ["lonsty"]
 license = "MIT"

@@ -28,6 +28,7 @@ let isLoadingMore = false;
 let currentQuery = '';
 let currentModalData = null;
 let isEditMode = false;
+let hasUnsavedChanges = false;
 let confirmCallback = null;
 let currentSettings = null;
 
@@ -41,6 +42,7 @@ const btnSearchClear = document.getElementById('btn-search-clear');
 const statsBar = document.getElementById('stats-bar');
 const statsText = document.getElementById('stats-text');
 const modalOverlay = document.getElementById('modal-overlay');
+const modalBody = document.querySelector('.modal-body');
 const modalContent = document.getElementById('modal-content');
 const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
@@ -58,7 +60,10 @@ const btnModalFullscreen = document.getElementById('btn-modal-fullscreen');
 const btnModalPin = document.getElementById('btn-modal-pin');
 const btnModalEdit = document.getElementById('btn-modal-edit');
 const modalLangSelect = document.getElementById('modal-lang-select');
+const modalEditorContainer = document.getElementById('modal-editor-container');
 const modalEditor = document.getElementById('modal-editor');
+const modalEditorPreview = document.getElementById('modal-editor-preview');
+const modalEditorCode = document.getElementById('modal-editor-code');
 const modalCode = document.getElementById('modal-code');
 const btnClearAll = document.getElementById('btn-clear-all');
 const confirmOverlay = document.getElementById('confirm-overlay');
@@ -522,12 +527,13 @@ function showCopyFeedback(btnEl) {
 function openModal(item) {
   currentModalData = item;
   isEditMode = false;
+  hasUnsavedChanges = false;
   const type = item.type || 'text';
 
   modalContent.style.display = 'none';
   modalImageWrap.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
-  modalEditor.style.display = 'none';
+  modalEditorContainer.style.display = 'none';
 
   // Reset edit button state
   btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
@@ -574,10 +580,31 @@ function openModal(item) {
 }
 
 function closeModal() {
+  // Check for unsaved changes
+  if (isEditMode && hasUnsavedChanges) {
+    showConfirm(
+      t('unsavedTitle'),
+      t('unsavedDesc'),
+      t('discardChanges'),
+      () => {
+        hideConfirm();
+        forceCloseModal();
+      }
+    );
+    return;
+  }
+  forceCloseModal();
+}
+
+function forceCloseModal() {
   modalOverlay.style.display = 'none';
   currentModalData = null;
   isEditMode = false;
-  modalEditor.style.display = 'none';
+  hasUnsavedChanges = false;
+  modalEditorContainer.style.display = 'none';
+  modalEditor.classList.remove('has-highlight');
+  modalEditorContainer.classList.remove('editing');
+  modalBody.classList.remove('editing-mode');
   tagInputWrap.style.display = 'none';
   tagSuggestions.style.display = 'none';
 }
@@ -621,34 +648,55 @@ async function openFullscreen() {
   // 富文本类型：渲染HTML内容
   // 统一使用 margin:16px 和 padding:16px，与详情页 .modal-body 保持一致
   } else if (type === 'html' && item.htmlContent) {
-    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    // Escape for safe embedding in JavaScript string literals
+    const escapedHtml = item.htmlContent
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+    const escapedText = (item.content || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
     bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
       ${item.htmlContent}
     </div>`;
     copyDataScript = `
       async function doCopy() {
         try {
-          const htmlStr = \`${escapedHtml}\`;
-          const textStr = \`${escapedText}\`;
+          const htmlStr = '${escapedHtml}';
+          const textStr = '${escapedText}';
           const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
           const textBlob = new Blob([textStr], {type: 'text/plain'});
           await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
           showCopyOk();
         } catch {
-          await navigator.clipboard.writeText(\`${escapedText}\`);
+          await navigator.clipboard.writeText('${escapedText}');
           showCopyOk();
         }
       }`;
   } else {
     const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
     const codeClass = item.language ? ' class="hljs"' : '';
-    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    // Escape for safe embedding in JavaScript string literals
+    const escapedForJs = (item.content || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
     bodyContent = `<pre style="margin:16px;padding:16px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);"><code${codeClass}>${escaped}</code></pre>`;
     copyDataScript = `
       async function doCopy() {
         try {
-          await navigator.clipboard.writeText(\`${escapedForJs}\`);
+          const text = '${escapedForJs}';
+          await navigator.clipboard.writeText(text);
           showCopyOk();
         } catch {}
       }`;
@@ -753,20 +801,33 @@ async function openStickyNote() {
       }`;
   // 富文本类型：渲染HTML内容，紧凑布局
   } else if (type === 'html' && item.htmlContent) {
-    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    // Escape for safe embedding in JavaScript string literals
+    const escapedHtml = item.htmlContent
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+    const escapedText = (item.content || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
     bodyContent = `<div class="sticky-body" style="font-size:13px;line-height:1.6;">${item.htmlContent}</div>`;
     copyDataScript = `
       async function doCopy() {
         try {
-          const htmlStr = \`${escapedHtml}\`;
-          const textStr = \`${escapedText}\`;
+          const htmlStr = '${escapedHtml}';
+          const textStr = '${escapedText}';
           const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
           const textBlob = new Blob([textStr], {type: 'text/plain'});
           await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
           showCopyOk();
         } catch {
-          await navigator.clipboard.writeText(\`${escapedText}\`);
+          await navigator.clipboard.writeText('${escapedText}');
           showCopyOk();
         }
       }`;
@@ -774,12 +835,20 @@ async function openStickyNote() {
   } else {
     const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
     const codeClass = item.language ? ' class="hljs"' : '';
-    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+    // Escape for safe embedding in JavaScript string literals
+    const escapedForJs = (item.content || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
     bodyContent = `<pre class="sticky-body" style="font-family:${fontMono};font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;"><code${codeClass}>${escaped}</code></pre>`;
     copyDataScript = `
       async function doCopy() {
         try {
-          await navigator.clipboard.writeText(\`${escapedForJs}\`);
+          const text = '${escapedForJs}';
+          await navigator.clipboard.writeText(text);
           showCopyOk();
         } catch {}
       }`;
@@ -1095,11 +1164,27 @@ btnModalEdit.addEventListener('click', async () => {
   if (!isEditMode) {
     // Enter edit mode
     isEditMode = true;
+    hasUnsavedChanges = false;
+    
+    // Calculate editor height to match content display area
+    // Subtract space for container margin (4px * 2) = 8px
+    const contentDisplayHeight = modalContent.offsetHeight || modalHtmlWrap.offsetHeight || 80;
+    const editorHeight = Math.max(80, Math.min(contentDisplayHeight - 8, 500));
+    
     modalEditor.value = currentModalData.content || '';
+    modalEditor.style.height = `${editorHeight}px`;
+    modalEditorPreview.style.height = `${editorHeight}px`;
+    
     modalContent.style.display = 'none';
     modalHtmlWrap.style.display = 'none';
-    modalEditor.style.display = 'block';
-    modalEditor.focus();
+    modalEditorContainer.style.display = 'block';
+    modalEditorContainer.classList.add('editing');
+    modalBody.classList.add('editing-mode');
+    
+    // Update initial highlight
+    updateEditorHighlight();
+    
+    // Don't auto-focus, just display content
     btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
     btnModalEdit.title = t('save');
   } else {
@@ -1109,7 +1194,11 @@ btnModalEdit.addEventListener('click', async () => {
     currentModalData.content = newContent;
     currentModalData.contentLength = [...newContent].length;
     isEditMode = false;
-    modalEditor.style.display = 'none';
+    hasUnsavedChanges = false;
+    modalEditorContainer.style.display = 'none';
+    modalEditor.classList.remove('has-highlight');
+    modalEditorContainer.classList.remove('editing');
+    modalBody.classList.remove('editing-mode');
 
     // Re-render content with highlighting
     const lang = currentModalData.language;
@@ -1130,6 +1219,40 @@ btnModalEdit.addEventListener('click', async () => {
     btnModalEdit.title = t('edit');
 
     await refreshList();
+  }
+});
+
+// Real-time syntax highlighting in editor
+function updateEditorHighlight() {
+  if (!isEditMode || !currentModalData) return;
+  
+  const lang = currentModalData.language;
+  const content = modalEditor.value;
+  
+  if (lang && typeof hljs !== 'undefined') {
+    modalEditor.classList.add('has-highlight');
+    const highlighted = highlightCode(content, lang);
+    modalEditorCode.innerHTML = highlighted;
+    modalEditorCode.className = 'hljs';
+  } else {
+    // No syntax highlighting - show plain text in preview layer
+    modalEditor.classList.add('has-highlight');
+    modalEditorCode.textContent = content;
+    modalEditorCode.className = '';
+  }
+}
+
+// Track unsaved changes and update highlight
+modalEditor.addEventListener('input', () => {
+  hasUnsavedChanges = true;
+  updateEditorHighlight();
+});
+
+// Sync scroll between editor and preview
+modalEditor.addEventListener('scroll', () => {
+  if (modalEditorPreview) {
+    modalEditorPreview.scrollTop = modalEditor.scrollTop;
+    modalEditorPreview.scrollLeft = modalEditor.scrollLeft;
   }
 });
 

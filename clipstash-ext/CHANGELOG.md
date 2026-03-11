@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - v0.1.3
+
+### Security
+
+- **[CRITICAL] SQL injection fix** — escaped LIKE special characters (`\`, `%`, `_`) in search queries
+- **[CRITICAL] XSS prevention** — added HTML sanitization with DOMPurify for safe rendering of HTML content
+
+### Added
+
+- **Constants module** — extracted all magic numbers and config values to `constants.js`
+- **Error handling** — comprehensive try-catch blocks and error logging for all async operations
+- **Public API** — exported `getCaches` function for external use
+
+### Changed
+
+- **Code refactoring** — unified error handling patterns across all storage functions
+- **Clipboard API** — prioritize modern `navigator.clipboard` API with `execCommand` fallback
+- **Code organization** — imported constants from centralized module for better maintainability
+
 ## [0.1.2] - 2026-03-10
 
 ### Added

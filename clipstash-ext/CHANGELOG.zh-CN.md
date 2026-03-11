@@ -4,6 +4,25 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布] - v0.1.3
+
+### 安全
+
+- **[严重] SQL 注入修复** — 在搜索查询中转义 LIKE 特殊字符（`\`、`%`、`_`）
+- **[严重] XSS 防护** — 为 HTML 内容渲染添加 DOMPurify 清理机制
+
+### 新增
+
+- **常量模块** — 提取所有魔法数字和配置值到 `constants.js`
+- **错误处理** — 为所有异步操作添加完整的 try-catch 块和错误日志
+- **公共 API** — 导出 `getCaches` 函数供外部使用
+
+### 变更
+
+- **代码重构** — 统一所有存储函数的错误处理模式
+- **剪切板 API** — 优先使用现代 `navigator.clipboard` API，降级到 `execCommand`
+- **代码组织** — 从集中化模块导入常量，提升可维护性
+
 ## [0.1.2] - 2026-03-10
 
 ### 新增
