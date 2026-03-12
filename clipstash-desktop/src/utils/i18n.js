@@ -80,6 +80,9 @@ const MESSAGES = {
     notifCached: 'Clipboard content cached',
     notifDuplicate: 'Content already cached',
     notifEmpty: 'Clipboard is empty',
+    unsavedTitle: 'Discard unsaved changes?',
+    unsavedDesc: 'You have unsaved edits that will be lost.',
+    discardChanges: 'Discard',
   },
   zh: {
     appName: 'ClipStash',

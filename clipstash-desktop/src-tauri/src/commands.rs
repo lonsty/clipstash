@@ -255,17 +255,14 @@ pub fn open_fullscreen_window(
         .title("ClipStash - Fullscreen")
         .inner_size(900.0, 700.0)
         .center()
-        .visible(false) // Start hidden to avoid flashing
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Show window after a brief delay to ensure content is loaded (non-blocking)
-    tauri::async_runtime::spawn(async move {
-        tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }).await.ok();
-        let _ = window.show();
-        let _ = window.set_focus();
+    // Set focus after a brief delay to ensure content is loaded
+    let window_clone = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = window_clone.set_focus();
     });
 
     Ok(true)
@@ -304,17 +301,14 @@ pub fn open_sticky_window(
         .inner_size(400.0, 350.0)
         .always_on_top(true)
         .center()
-        .visible(false) // Start hidden to avoid flashing
         .build()
         .map_err(|e| e.to_string())?;
 
-    // Show window after a brief delay to ensure content is loaded (non-blocking)
-    tauri::async_runtime::spawn(async move {
-        tauri::async_runtime::spawn_blocking(|| {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }).await.ok();
-        let _ = window.show();
-        let _ = window.set_focus();
+    // Set focus after a brief delay to ensure content is loaded
+    let window_clone = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = window_clone.set_focus();
     });
 
     Ok(true)

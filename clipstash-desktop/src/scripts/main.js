@@ -385,6 +385,40 @@ function createCacheCard(item) {
 
   card.querySelector('.delete-btn').addEventListener('click', (e) => {
     e.stopPropagation();
+    
+    // Check if currently editing this item with unsaved changes
+    if (isEditMode && hasUnsavedChanges && currentModalData && currentModalData.id === item.id) {
+      showConfirm(
+        t('unsavedTitle'),
+        t('unsavedDesc'),
+        t('discardChanges'),
+        () => {
+          hideConfirm();
+          isEditMode = false;
+          hasUnsavedChanges = false;
+          modalEditorContainer.style.display = 'none';
+          modalEditor.classList.remove('has-highlight');
+          modalEditorContainer.classList.remove('editing');
+          modalBody.classList.remove('editing-mode');
+          
+          showConfirm(
+            t('confirmDeleteTitle'),
+            t('confirmDeleteDesc'),
+            t('confirmDeleteOk'),
+            async () => {
+              hideConfirm();
+              card.style.maxHeight = card.offsetHeight + 'px';
+              card.offsetHeight;
+              card.classList.add('removing');
+              await removeCache(item.id);
+              setTimeout(() => refreshList(), 300);
+            }
+          );
+        }
+      );
+      return;
+    }
+    
     showConfirm(
       t('confirmDeleteTitle'),
       t('confirmDeleteDesc'),

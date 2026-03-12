@@ -801,6 +801,8 @@ body {
   z-index: 2;
   white-space: pre-wrap;
   word-break: break-all;
+  overflow: auto;
+  tab-size: 4;
 }
 
 /* 当有语法高亮时，textarea 文本透明，显示下层高亮 */
@@ -824,9 +826,10 @@ body {
   line-height: 1.6;
   pointer-events: none;
   z-index: 1;
-  overflow: hidden;
+  overflow: auto;
   white-space: pre-wrap;
   word-break: break-all;
+  tab-size: 4;
 }
 
 .modal-editor-preview code {
