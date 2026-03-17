@@ -29,6 +29,8 @@
 - **Global hotkey** — `Alt+Shift+C` (customizable) to cache clipboard instantly
 - **Clipboard monitoring** — optional auto-cache on clipboard change
 - **Search & tags** — real-time search, tagging, pinning
+- **Inline editing** — edit content in detail modal with syntax highlighting, floating toolbar, and unsaved change protection
+- **Fullscreen & sticky note** — view content fullscreen or pin as always-on-top floating note
 - **Import / export** — JSON-based data portability
 - **Themes** — System / Light / Dark with full CSS variable system
 - **i18n** — English & 中文
@@ -79,8 +81,11 @@
 | Search | `Ctrl/Cmd+F` or click search bar |
 | Copy a cached item | Click the copy button on any card |
 | Pin / unpin | Click the pin button on any card |
-| Add tags | Open detail modal → click **Add Tag** |
 | View full content | Click on a card's content area |
+| Edit content | Open detail modal → click edit button in floating toolbar |
+| Fullscreen view | Open detail modal → click fullscreen button |
+| Sticky note | Open detail modal → click sticky note button |
+| Add tags | Open detail modal → click `+` button in tag area |
 | Settings | Click the gear icon or tray menu → **Settings...** |
 | Quit | Tray menu → **Quit** |
 
@@ -141,6 +146,7 @@ clipstash-desktop/
 ├── src-tauri/                     # Backend (Rust)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
+│   ├── capabilities/              # Window permissions
 │   ├── icons/                     # App icons
 │   └── src/
 │       ├── main.rs                # Entry point
@@ -153,12 +159,15 @@ clipstash-desktop/
 │       └── monitor.rs             # Clipboard auto-monitoring (500ms)
 ├── src/                           # Frontend (Vanilla JS)
 │   ├── index.html                 # Main page
+│   ├── fullscreen.html            # Fullscreen view page
 │   ├── icons/
 │   │   └── icon128.png            # App icon (header)
 │   ├── styles/
-│   │   └── main.css               # Styles (Light / Dark / System)
+│   │   ├── main.css               # Main styles (Light / Dark / System)
+│   │   └── fullscreen.css         # Fullscreen view styles
 │   ├── scripts/
-│   │   └── main.js                # Main logic
+│   │   ├── main.js                # Main logic
+│   │   └── fullscreen.js          # Fullscreen view logic
 │   └── utils/
 │       ├── bridge.js              # Tauri invoke wrapper
 │       ├── i18n.js                # i18n (EN / 中文, 80+ keys)

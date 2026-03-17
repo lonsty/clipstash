@@ -136,6 +136,40 @@ impl Database {
         })
     }
 
+    /// get_cache_by_id returns a single cached record by its ID.
+    pub fn get_cache_by_id(&self, id: &str) -> SqlResult<Option<CacheItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
+                    created_at, content_length, pinned, pinned_at, language
+             FROM caches WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(params![id], |row| {
+            Ok(CacheItem {
+                id: row.get(0)?,
+                cache_type: row.get(1)?,
+                content: row.get(2)?,
+                html_content: row.get(3)?,
+                image_data_url: row.get(4)?,
+                image_hash: row.get(5)?,
+                created_at: row.get(6)?,
+                content_length: row.get(7)?,
+                tags: Vec::new(),
+                pinned: row.get::<_, i32>(8)? != 0,
+                pinned_at: row.get(9)?,
+                language: row.get(10)?,
+            })
+        })?;
+
+        if let Some(row) = rows.next() {
+            let mut item = row?;
+            item.tags = self.get_tags_for_cache(&item.id)?;
+            Ok(Some(item))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// get_caches returns cached records with pagination, pinned first.
     pub fn get_caches(&self, offset: i64, limit: i64) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
@@ -385,7 +419,7 @@ impl Database {
                     c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language
              FROM caches c
              LEFT JOIN cache_tags ct ON c.id = ct.cache_id
-             WHERE LOWER(c.content) LIKE ?1 OR LOWER(ct.tag) LIKE ?1
+             WHERE LOWER(c.content) LIKE ?1 ESCAPE '\\' OR LOWER(ct.tag) LIKE ?1 ESCAPE '\\'
              ORDER BY c.pinned DESC,
                       CASE WHEN c.pinned = 1 THEN c.pinned_at ELSE c.created_at END DESC
              LIMIT ?2 OFFSET ?3",

@@ -391,7 +391,7 @@ body {
 .cache-text {
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-all;
@@ -402,11 +402,16 @@ body {
   -webkit-box-orient: vertical;
   margin: 0;
   padding: 0;
+  tab-size: 4;
 }
 
 .cache-text code {
   font-family: inherit;
   font-size: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  word-break: inherit;
+  tab-size: inherit;
   background: transparent !important;
   padding: 0 !important;
 }
@@ -681,18 +686,26 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 6px 16px;
   border-bottom: 1px solid var(--border-light);
-  gap: 12px;
+  gap: 8px;
+}
+
+/* Clip ID badge in header */
+.modal-header-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 1px 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  letter-spacing: 0.3px;
 }
 
 .modal-header .modal-meta {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-  line-height: 1.4;
-  word-wrap: break-word;
+  display: none;
 }
 
 .modal-header-actions {
@@ -724,11 +737,16 @@ body {
   position: relative;
 }
 
-/* 编辑模式下：保持padding不变 */
+/* 编辑模式下：减少 padding 补偿 container border + textarea padding，
+   保持文本到 modal 内壁的总距离与查看模式一致（上下12px，左右16px）
+   查看模式：modal-body padding 12px/16px
+   编辑模式：modal-body padding 6px/8px + border 2px + textarea padding 4px/6px = 12px/16px */
 .modal-body.editing-mode {
-  padding-left: 16px;
+  padding: 6px 8px;
 }
 
+/* ===== Shared content formatting (modal / fullscreen / sticky) ===== */
+.content-text,
 .modal-content {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -739,8 +757,10 @@ body {
   margin: 0;
   padding: 0;
   background: transparent;
+  tab-size: 4;
 }
 
+.content-text code,
 .modal-content code {
   font-family: inherit;
   font-size: inherit;
@@ -750,8 +770,10 @@ body {
   word-break: break-all;
   background: transparent !important;
   padding: 0 !important;
+  tab-size: inherit;
 }
 
+.content-text code.hljs,
 .modal-content code.hljs {
   background: transparent !important;
   padding: 0 !important;
@@ -763,46 +785,37 @@ body {
   width: 100%;
 }
 
-/* 编辑模式：外层添加margin，内部用伪元素绘制边框 */
+/* 编辑模式：容器使用 border 替代 outline，确保边框完全可见 */
 .modal-editor-container.editing {
   position: relative;
-  margin: 4px;
-}
-
-.modal-editor-container.editing::before {
-  content: '';
-  position: absolute;
-  top: -4px;
-  left: -4px;
-  right: -4px;
-  bottom: -4px;
+  display: block;
   border: 2px solid var(--success);
   border-radius: 4px;
   box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.08);
-  pointer-events: none;
-  z-index: 1;
 }
+
+/* Remove the pseudo-element border - using direct border instead */
 
 .modal-editor {
   width: 100%;
   min-height: 80px;
-  max-height: 500px;
   border: none;
   border-radius: 4px;
-  padding: 0;
+  padding: 4px 6px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   color: var(--text);
   background: var(--bg);
   outline: none;
-  resize: vertical;
+  resize: none;
   position: relative;
   z-index: 2;
   white-space: pre-wrap;
   word-break: break-all;
-  overflow: auto;
+  overflow: hidden;
   tab-size: 4;
+  box-sizing: border-box;
 }
 
 /* 当有语法高亮时，textarea 文本透明，显示下层高亮 */
@@ -812,30 +825,37 @@ body {
   background: transparent;
 }
 
-/* 语法高亮预览层 */
+/* 语法高亮预览层 - 绝对定位覆盖 textarea */
 .modal-editor-preview {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 0;
+  padding: 4px 6px;
   margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   pointer-events: none;
   z-index: 1;
-  overflow: auto;
+  overflow: hidden;
   white-space: pre-wrap;
   word-break: break-all;
   tab-size: 4;
+  box-sizing: border-box;
 }
 
 .modal-editor-preview code {
   background: transparent !important;
   padding: 0 !important;
   display: block;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: inherit;
+  word-break: inherit;
+  tab-size: inherit;
 }
 
 .modal-lang-select {
@@ -889,6 +909,7 @@ body {
   object-fit: contain;
 }
 
+.content-html,
 .modal-html-wrap {
   font-size: 12px;
   line-height: 1.6;
@@ -896,56 +917,44 @@ body {
   overflow: auto;
 }
 
+.content-html img,
 .modal-html-wrap img {
   max-width: 100%;
 }
 
 /* Modal Tags Section */
-.modal-tags-section {
-  padding: 8px 16px;
-  border-top: 1px solid var(--border-light);
-}
-
-/* 无标签时减少内边距 */
-.modal-tags-section.no-tags {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-
-.modal-tags-header {
+/* Bottom status bar (meta info + lang select) */
+.modal-status-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  padding: 4px 16px;
+  border-top: 1px solid var(--border-light);
   gap: 8px;
 }
 
-/* 无标签时header不需要底部间距 */
-.modal-tags-section.no-tags .modal-tags-header {
-  margin-bottom: 0;
+.modal-status-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
-.modal-tags-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary);
+.modal-status-bar .modal-lang-select {
+  flex-shrink: 0;
 }
 
-.modal-tags-header #modal-lang-select {
-  margin-left: auto;
+.modal-tags-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 16px;
+  min-height: 32px;
+  border-top: 1px solid var(--border-light);
 }
 
 .modal-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 4px;
-}
-
-/* 无标签时不占用底部间距 */
-.modal-tags:empty,
-.modal-tags[style*="display: none"] {
-  margin-bottom: 0;
+  display: contents;
 }
 
 .modal-tags .tag {
@@ -961,9 +970,40 @@ body {
   opacity: 1;
 }
 
+/* Inline add-tag button (+ icon with optional label) */
+.btn-add-tag-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.btn-add-tag-inline:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-light);
+}
+
+.btn-add-tag-label {
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .tag-input-wrap {
   position: relative;
-  margin-top: 6px;
+  width: 100%;
+  flex-basis: 100%;
+  margin-top: 2px;
 }
 
 .tag-input {
@@ -981,6 +1021,25 @@ body {
 
 .tag-input:focus {
   border-color: var(--primary);
+}
+
+/* Tag exists hint */
+.tag-input.tag-exists {
+  border-color: var(--danger);
+  animation: shake 0.3s ease;
+}
+
+.tag-exists-hint {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 2px;
+  padding-left: 2px;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
 }
 
 .tag-suggestions {
@@ -1011,23 +1070,128 @@ body {
   color: var(--text);
 }
 
-.modal-footer {
+/* ===== Shared floating content toolbar (modal / fullscreen / sticky) ===== */
+.content-toolbar,
+.modal-content-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border-light);
+  justify-content: flex-end;
+  gap: 4px;
+  pointer-events: none;
+  height: 0;
+  overflow: visible;
 }
 
-.modal-footer-main {
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  pointer-events: auto;
+  opacity: 0.45;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Parent-hover: reveal toolbar buttons when hovering content area */
+.modal-body:hover .toolbar-btn,
+.fs-body:hover .toolbar-btn {
+  opacity: 0.85;
+}
+
+.toolbar-btn:hover {
+  opacity: 1 !important;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
+
+.toolbar-btn.copied {
+  opacity: 1 !important;
+  background: var(--success);
+  color: #fff;
+  border-color: var(--success);
+}
+
+/* Hide toolbar in edit mode */
+.modal-body.editing-mode .modal-content-toolbar,
+.modal-body.editing-mode .content-toolbar {
+  display: none;
+}
+
+/* Edit mode indicator bar — inside header, replaces meta */
+.modal-edit-bar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.edit-bar-left {
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--success);
 }
 
-.modal-footer-main .btn {
+.edit-bar-left svg {
+  flex-shrink: 0;
+  color: var(--success);
+}
+
+.edit-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Edit-mode buttons: match header-actions button height (28px) */
+.edit-bar-actions .btn {
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
   height: 28px;
   padding: 0 12px;
+}
+
+.edit-bar-actions .btn-ghost {
+  color: var(--success);
+  border-color: var(--success);
+  opacity: 0.7;
+}
+
+.edit-bar-actions .btn-ghost:hover {
+  opacity: 1;
+  background: var(--success-light);
+}
+
+.edit-bar-actions .btn-primary {
+  background: var(--success);
+  border: 1px solid var(--success);
+}
+
+.edit-bar-actions .btn-primary:hover {
+  background: #16a34a;
+  border-color: #16a34a;
 }
 
 /* Confirm Dialog */

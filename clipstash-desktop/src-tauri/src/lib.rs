@@ -5,6 +5,7 @@ mod hotkey;
 mod monitor;
 mod tray;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use tauri::Manager;
 
@@ -13,9 +14,10 @@ pub struct AppState {
     pub db: Mutex<db::Database>,
     pub monitor_enabled: Mutex<bool>,
     pub last_clipboard_hash: Mutex<String>,
-    /// When true, the main window will not auto-hide on focus loss.
-    /// Used to keep the window visible while native dialogs (file open/save) are shown.
-    pub suppress_auto_hide: Mutex<bool>,
+    /// Reference counter that tracks the number of active reasons to suppress
+    /// auto-hide on the main window (e.g. open fullscreen/sticky windows, dialogs).
+    /// When > 0 the main window will not auto-hide on focus loss.
+    pub suppress_auto_hide_count: AtomicUsize,
 }
 
 pub fn run() {
@@ -44,7 +46,7 @@ pub fn run() {
                 db: Mutex::new(database),
                 monitor_enabled: Mutex::new(false),
                 last_clipboard_hash: Mutex::new(String::new()),
-                suppress_auto_hide: Mutex::new(false),
+                suppress_auto_hide_count: AtomicUsize::new(0),
             });
 
             // Setup system tray
@@ -78,7 +80,7 @@ pub fn run() {
                         let suppressed = window
                             .app_handle()
                             .try_state::<AppState>()
-                            .map(|s| *s.suppress_auto_hide.lock().unwrap())
+                            .map(|s| s.suppress_auto_hide_count.load(Ordering::SeqCst) > 0)
                             .unwrap_or(false);
                         if !suppressed {
                             window.hide().ok();
@@ -86,17 +88,21 @@ pub fn run() {
                     }
                 }
                 tauri::WindowEvent::Destroyed => {
-                    // When a fullscreen or sticky window is closed, restore auto-hide behavior
+                    // When a fullscreen or sticky window is closed, decrement suppress counter
                     if window.label().starts_with("fullscreen_") || window.label().starts_with("sticky_") {
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
-                            if let Ok(mut flag) = state.suppress_auto_hide.lock() {
-                                *flag = false;
-                            }
+                            // Saturating decrement: never go below zero
+                            state.suppress_auto_hide_count.fetch_update(
+                                Ordering::SeqCst, Ordering::SeqCst,
+                                |v| Some(v.saturating_sub(1))
+                            ).ok();
                         }
-                        // Clean up the temp HTML file
-                        if let Ok(temp_dir) = window.app_handle().path().app_data_dir() {
-                            let temp_file = temp_dir.join(format!("{}.html", window.label()));
-                            std::fs::remove_file(temp_file).ok();
+                        // Clean up the temp HTML file (sticky windows still use temp files)
+                        if window.label().starts_with("sticky_") {
+                            if let Ok(temp_dir) = window.app_handle().path().app_data_dir() {
+                                let temp_file = temp_dir.join(format!("{}.html", window.label()));
+                                std::fs::remove_file(temp_file).ok();
+                            }
                         }
                     }
                 }
@@ -106,6 +112,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::read_clipboard,
             commands::write_clipboard,
+            commands::get_cache_by_id,
             commands::get_caches,
             commands::add_cache,
             commands::remove_cache,

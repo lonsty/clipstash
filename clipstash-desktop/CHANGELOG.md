@@ -5,33 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.3-beta] - 2026-03-12
-
-> ⚠️ **Beta Release**: This version fixes critical issues found in v0.1.3-alpha. Still requires validation for experimental fixes.
+## [0.1.3] - 2026-03-17
 
 ### Security
 
-- **[CRITICAL] SQL injection fix** — escaped LIKE special characters (`\`, `%`, `_`) in `search_caches` function to prevent malicious query injection *(needs validation)*
+- **[CRITICAL] SQL injection fix** — added `ESCAPE '\\'` clause to LIKE conditions in `search_caches` to prevent query injection
+- **XSS sanitization** — fullscreen and sticky note HTML injection now sanitizes `<script>` tags and escapes `</script>` in JS string literals
 
 ### Fixed
 
-- **Fullscreen view blank on Windows** — fixed JavaScript string escaping in HTML content generation (replaced template literals with properly escaped single quotes) *(needs validation)*
-- **Application freeze after fullscreen** — replaced async runtime spawn with std::thread::spawn for better cross-platform compatibility *(needs validation)*
-- **Inline editor visual consistency** — editing mode now matches view mode layout with proper border spacing and consistent content positioning
-- **Editor cursor alignment** — fixed textarea and syntax highlight layer misalignment by synchronizing overflow behavior and tab-size
+- **Application freeze after fullscreen (Windows)** — replaced `Mutex<bool>` with `AtomicUsize` reference counter for `suppress_auto_hide` to eliminate deadlocks in multi-window scenarios
+- **GitHub Actions Windows build failure** — upgraded `tauri-apps/tauri-action` from `@v0` to `@v0.5`; removed global `APPLE_SIGNING_IDENTITY` and `TAURI_SIGNING_IDENTITY` environment variables
+- **Fullscreen view blank on Windows** — fixed JavaScript string escaping in HTML content generation
+- **Inline editor visual consistency** — editing mode now matches view mode layout; text width, position, and scrolling behavior are identical
+- **Editor cursor alignment** — synchronized textarea and syntax highlight layer overflow behavior and tab-size
+- **Fullscreen toolbar hover** — fixed toolbar buttons not appearing on hover in fullscreen page
+- **Sticky note horizontal scrollbar** — disabled horizontal scrolling; all content (text, code, HTML) auto-wraps to fit window width
 - **Delete button in edit mode** — now checks for unsaved changes before deleting an item being edited
-- **Missing English translations** — added unsavedTitle, unsavedDesc, and discardChanges to English locale
+- **Missing i18n translations** — added `editing`, `cancelEdit`, `saveEdit`, `addTagHint`, `tagExists` to both EN/ZH locales
+
+### Added
+
+- **Floating toolbar** — copy and edit buttons float at top-right of content area with backdrop blur, auto-hide in edit mode
+- **Edit mode indicator bar** — header switches to green "✏️ Editing" bar with explicit Cancel / Save buttons when editing
+- **Unsaved changes confirmation** — cancelling edit with unsaved changes shows a confirmation dialog
+- **Card ID badge** — modal header displays `#shortID` (first 8 characters) in monospace badge style
+- **Tag duplicate detection** — input shakes with red border and "Tag already exists" hint when adding a duplicate tag
+- **Tag input auto-close** — tag input field auto-closes on blur (150ms delay to avoid click conflicts)
 
 ### Changed
 
-- **Inline editor design** — removed gradient background, added green border around editor with 4px spacing
-- **Editor height behavior** — dynamic height adjustment to match content size (min 80px, max 500px) instead of fixed 240px
+- **Edit mode redesign** — replaced single toggle button with `enterEditMode()` / `saveEdit()` / `cancelEdit()` three-function architecture
+- **Edit mode button colors** — Cancel/Save use green (`--success`) theme to distinguish from grey utility buttons (fullscreen/sticky/close)
+- **Modal footer removed** — copy/edit buttons moved to floating toolbar; meta info moved to bottom status bar
+- **Tags section redesign** — inline flow layout with `+` circle button (dashed border); shows "Add tag" text when empty, icon-only when tags exist
+- **Language selector relocated** — moved from tags section to status bar right side
+- **Header compact padding** — modal header padding reduced from `10px 16px` to `6px 16px`
+- **Multi-page style unification** — extracted shared CSS classes (`.content-toolbar`, `.content-text`, `.content-html`, `.toolbar-btn`) across modal, fullscreen, and sticky pages; sticky note inline styles now use CSS variables
+- **Fullscreen header streamlined** — removed duplicate meta info from header (kept only in bottom status bar); fixed header height to 44px for consistent edit/view transitions
+- **Close to tray setting removed** — removed non-functional `closeToTray` toggle from settings UI (behavior unchanged: window always hides on focus loss)
+- **Editor height behavior** — dynamic height adjustment to match content (uses `max(viewHeight, scrollHeight, 80)`) with auto-grow on input
 - **Error handling** — improved error logging for database operations
-- **Window initialization** — removed visible(false) approach, using direct window creation for better cross-platform support
-
-## [0.1.3-alpha] - 2026-03-11
-
-> ⚠️ **Alpha Release**: Deprecated due to critical bugs. Use v0.1.3-beta instead.
+- **Window capabilities** — added `sticky_*` window permissions to capabilities config
 
 ## [0.1.2] - 2026-03-10
 
@@ -95,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-platform** — macOS (.app / .dmg), Windows (.exe), Linux (.deb / .AppImage)
 - **Privacy** — zero network requests, all data stored locally
 
+[0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

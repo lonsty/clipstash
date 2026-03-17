@@ -48,7 +48,8 @@ const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
 const modalHtmlWrap = document.getElementById('modal-html-wrap');
 const modalMeta = document.getElementById('modal-meta');
-const modalTagsSection = document.querySelector('.modal-tags-section');
+const modalHeaderId = document.getElementById('modal-header-id');
+const modalStatusMeta = document.getElementById('modal-status-meta');
 const modalTagsEl = document.getElementById('modal-tags');
 const btnAddTag = document.getElementById('btn-add-tag');
 const tagInputWrap = document.getElementById('tag-input-wrap');
@@ -59,6 +60,11 @@ const btnModalCopy = document.getElementById('btn-modal-copy');
 const btnModalFullscreen = document.getElementById('btn-modal-fullscreen');
 const btnModalPin = document.getElementById('btn-modal-pin');
 const btnModalEdit = document.getElementById('btn-modal-edit');
+const modalContentToolbar = document.getElementById('modal-content-toolbar');
+const modalEditBar = document.getElementById('modal-edit-bar');
+const modalHeaderActions = document.querySelector('.modal-header-actions');
+const btnEditCancel = document.getElementById('btn-edit-cancel');
+const btnEditSave = document.getElementById('btn-edit-save');
 const modalLangSelect = document.getElementById('modal-lang-select');
 const modalEditorContainer = document.getElementById('modal-editor-container');
 const modalEditor = document.getElementById('modal-editor');
@@ -86,7 +92,6 @@ const btnShortcutCancel = document.getElementById('btn-shortcut-cancel');
 const toggleAutostart = document.getElementById('toggle-autostart');
 const toggleClipboardMonitor = document.getElementById('toggle-clipboard-monitor');
 const toggleNotification = document.getElementById('toggle-notification');
-const toggleCloseToTray = document.getElementById('toggle-close-to-tray');
 const btnExport = document.getElementById('btn-export');
 const btnImport = document.getElementById('btn-import');
 const importStatus = document.getElementById('import-status');
@@ -251,23 +256,20 @@ function renderModalTags() {
   
   modalTagsEl.innerHTML = '';
   
-  // 有标签时显示标签容器
-  if (tags.length > 0) {
-    modalTagsEl.style.display = 'flex';
-    modalTagsSection.classList.remove('no-tags');
-    for (const tag of tags) {
-      modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
-        const newTags = currentModalData.tags.filter(x => x !== tg);
-        await updateCacheTags(currentModalData.id, newTags);
-        currentModalData.tags = newTags;
-        renderModalTags();
-        await refreshList();
-      }));
-    }
-  } else {
-    // 无标签时隐藏标签容器并添加样式类
-    modalTagsEl.style.display = 'none';
-    modalTagsSection.classList.add('no-tags');
+  for (const tag of tags) {
+    modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
+      const newTags = currentModalData.tags.filter(x => x !== tg);
+      await updateCacheTags(currentModalData.id, newTags);
+      currentModalData.tags = newTags;
+      renderModalTags();
+      await refreshList();
+    }));
+  }
+
+  // Show text label on add-tag button only when no tags exist
+  const addTagLabel = btnAddTag.querySelector('.btn-add-tag-label');
+  if (addTagLabel) {
+    addTagLabel.style.display = tags.length === 0 ? '' : 'none';
   }
 }
 
@@ -298,7 +300,10 @@ async function addTagToCurrentItem(tagName) {
   const name = tagName.trim();
   if (!name || name.length > 20) return;
   const tags = currentModalData.tags || [];
-  if (tags.includes(name)) return;
+  if (tags.includes(name)) {
+    showTagExistsHint(tagInput, tagInputWrap);
+    return;
+  }
   tags.push(name);
   await updateCacheTags(currentModalData.id, tags);
   currentModalData.tags = tags;
@@ -307,6 +312,29 @@ async function addTagToCurrentItem(tagName) {
   tagSuggestions.style.display = 'none';
   tagInputWrap.style.display = 'none';
   await refreshList();
+}
+
+function showTagExistsHint(inputEl, wrapEl) {
+  // Remove existing hint if any
+  const oldHint = wrapEl.querySelector('.tag-exists-hint');
+  if (oldHint) oldHint.remove();
+
+  // Add error style with shake
+  inputEl.classList.remove('tag-exists');
+  void inputEl.offsetWidth; // force reflow to re-trigger animation
+  inputEl.classList.add('tag-exists');
+
+  // Show hint text
+  const hint = document.createElement('div');
+  hint.className = 'tag-exists-hint';
+  hint.textContent = t('tagExists');
+  wrapEl.appendChild(hint);
+
+  // Auto-clear after 2s
+  setTimeout(() => {
+    inputEl.classList.remove('tag-exists');
+    hint.remove();
+  }, 2000);
 }
 
 // ===== Card Rendering =====
@@ -400,6 +428,9 @@ function createCacheCard(item) {
           modalEditor.classList.remove('has-highlight');
           modalEditorContainer.classList.remove('editing');
           modalBody.classList.remove('editing-mode');
+          modalEditBar.style.display = 'none';
+          modalHeaderId.style.display = '';
+          modalHeaderActions.style.display = '';
           
           showConfirm(
             t('confirmDeleteTitle'),
@@ -568,10 +599,12 @@ function openModal(item) {
   modalImageWrap.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
   modalEditorContainer.style.display = 'none';
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
 
-  // Reset edit button state
-  btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-  btnModalEdit.title = t('edit');
+  // Set header ID badge (short form: first 8 chars)
+  const shortId = String(item.id).length > 8 ? String(item.id).slice(0, 8) : String(item.id);
+  modalHeaderId.textContent = `#${shortId}`;
 
   // Show/hide edit & language controls based on type
   btnModalEdit.style.display = (type === 'image') ? 'none' : 'inline-flex';
@@ -604,7 +637,9 @@ function openModal(item) {
   const sizeInfo = type === 'image'
     ? `${t('typeImage')} · ${formatBytes(estimateDataUrlBytes(item.imageDataUrl))}`
     : `${item.contentLength} ${t('chars')}`;
-  modalMeta.textContent = `${sizeInfo} · ${formatFullTime(item.createdAt)}`;
+  const metaText = `${sizeInfo} · ${formatFullTime(item.createdAt)}`;
+  modalMeta.textContent = metaText;
+  modalStatusMeta.textContent = metaText;
 
   renderModalTags();
   tagInputWrap.style.display = 'none';
@@ -639,156 +674,20 @@ function forceCloseModal() {
   modalEditor.classList.remove('has-highlight');
   modalEditorContainer.classList.remove('editing');
   modalBody.classList.remove('editing-mode');
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
+  modalHeaderActions.style.display = '';
   tagInputWrap.style.display = 'none';
   tagSuggestions.style.display = 'none';
 }
 
 async function openFullscreen() {
   if (!currentModalData) return;
-  const item = currentModalData;
-  const type = item.type || 'text';
-  const isDark = currentTheme === 'dark' ||
-    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const bgColor = isDark ? '#1a1b1e' : '#ffffff';
-  const textColor = isDark ? '#e4e5e7' : '#111827';
-  const btnBg = isDark ? '#25262b' : '#f1f5f9';
-  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
-  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
-  const successColor = '#22c55e';
-  const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
-
-  let bodyContent = '';
-  let copyDataScript = '';
-
-  if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="position:relative;margin:16px;padding:16px;min-height:calc(100vh - 32px);border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);display:flex;align-items:center;justify-content:center;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 64px);object-fit:contain;">
-    </div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const img = document.querySelector('img');
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          canvas.toBlob(async (blob) => {
-            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
-            showCopyOk();
-          }, 'image/png');
-        } catch { showCopyOk(); }
-      }`;
-  // 富文本类型：渲染HTML内容
-  // 统一使用 margin:16px 和 padding:16px，与详情页 .modal-body 保持一致
-  } else if (type === 'html' && item.htmlContent) {
-    // Escape for safe embedding in JavaScript string literals
-    const escapedHtml = item.htmlContent
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    const escapedText = (item.content || '')
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      ${item.htmlContent}
-    </div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const htmlStr = '${escapedHtml}';
-          const textStr = '${escapedText}';
-          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
-          const textBlob = new Blob([textStr], {type: 'text/plain'});
-          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
-          showCopyOk();
-        } catch {
-          await navigator.clipboard.writeText('${escapedText}');
-          showCopyOk();
-        }
-      }`;
-  } else {
-    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
-    const codeClass = item.language ? ' class="hljs"' : '';
-    // Escape for safe embedding in JavaScript string literals
-    const escapedForJs = (item.content || '')
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    bodyContent = `<pre style="margin:16px;padding:16px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);"><code${codeClass}>${escaped}</code></pre>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const text = '${escapedForJs}';
-          await navigator.clipboard.writeText(text);
-          showCopyOk();
-        } catch {}
-      }`;
-  }
-
-  const copyBtnLabel = t('copy');
-  const copiedLabel = t('copied');
-
-  const hljsCssInline = item.language ? getHljsCss() : '';
-
-  // 生成完整的HTML页面用于全屏展示
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>ClipStash - ${t('fullscreen')}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  img { display: block; }
-  /* 清除 code 和 code.hljs 的内边距，避免与 pre 的 padding 叠加 */
-  code { padding: 0 !important; background: transparent !important; display: block; }
-  code.hljs { padding: 0 !important; background: transparent !important; }
-  /* 工具栏固定在右上角，位于内容边框内部：margin(16px) + 12px = 28px */
-  .toolbar { position: fixed; top: 28px; right: 28px; z-index: 10; display: flex; gap: 8px; }
-  /* 复制按钮：默认半透明，hover和点击后完全显示 */
-  .copy-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: 1px solid ${btnBorder}; border-radius: 6px; background: ${btnBg}; color: ${textColor}; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.2s; opacity: 0.5; backdrop-filter: blur(8px); }
-  .copy-btn:hover { background: ${btnHover}; opacity: 1; }
-  .copy-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; opacity: 1; }
-  .copy-btn svg { width: 14px; height: 14px; }
-  ${hljsCssInline}
-</style>
-</head>
-<body>
-<div class="toolbar">
-  <button class="copy-btn" onclick="doCopy()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    <span id="copy-text">${copyBtnLabel}</span>
-  </button>
-</div>
-${bodyContent}
-<script>
-  function showCopyOk() {
-    const btn = document.querySelector('.copy-btn');
-    const txt = document.getElementById('copy-text');
-    btn.classList.add('copied');
-    txt.textContent = '${copiedLabel}';
-    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
-  }
-  ${copyDataScript}
-</script>
-</body>
-</html>`;
-
   try {
-    await openFullscreenWindow(html);
+    await openFullscreenWindow(currentModalData.id);
   } catch {
-    const blob = new Blob([html], { type: 'text/html' });
+    // Fallback: open as blob URL if Tauri API fails
+    const blob = new Blob([`<p>Failed to open fullscreen</p>`], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
   }
@@ -803,7 +702,6 @@ async function openStickyNote() {
     (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const bgColor = isDark ? '#1a1b1e' : '#ffffff';
   const textColor = isDark ? '#e4e5e7' : '#111827';
-  const btnBg = isDark ? '#25262b' : '#f1f5f9';
   const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
   const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
   const successColor = '#22c55e';
@@ -815,8 +713,8 @@ async function openStickyNote() {
 
   // 图片类型：flexbox居中展示
   if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;flex:1;padding:8px;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 44px);object-fit:contain;">
+    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;flex:1;">
+      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:100%;object-fit:contain;">
     </div>`;
     copyDataScript = `
       async function doCopy() {
@@ -842,15 +740,21 @@ async function openStickyNote() {
       .replace(/"/g, '\\"')
       .replace(/\n/g, '\\n')
       .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
+      .replace(/\t/g, '\\t')
+      .replace(/<\/script>/gi, '<\\/script>');
     const escapedText = (item.content || '')
       .replace(/\\/g, '\\\\')
       .replace(/'/g, "\\'")
       .replace(/"/g, '\\"')
       .replace(/\n/g, '\\n')
       .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    bodyContent = `<div class="sticky-body" style="font-size:13px;line-height:1.6;">${item.htmlContent}</div>`;
+      .replace(/\t/g, '\\t')
+      .replace(/<\/script>/gi, '<\\/script>');
+    // Sanitize HTML content for safe DOM embedding: neutralize script tags
+    const sanitizedStickyHtml = item.htmlContent
+      .replace(/<script[\s>]/gi, '&lt;script ')
+      .replace(/<\/script>/gi, '&lt;/script&gt;');
+    bodyContent = `<div class="content-html">${sanitizedStickyHtml}</div>`;
     copyDataScript = `
       async function doCopy() {
         try {
@@ -876,8 +780,9 @@ async function openStickyNote() {
       .replace(/"/g, '\\"')
       .replace(/\n/g, '\\n')
       .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t');
-    bodyContent = `<pre class="sticky-body" style="font-family:${fontMono};font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;"><code${codeClass}>${escaped}</code></pre>`;
+      .replace(/\t/g, '\\t')
+      .replace(/<\/script>/gi, '<\\/script>');
+    bodyContent = `<pre class="content-text"><code${codeClass}>${escaped}</code></pre>`;
     copyDataScript = `
       async function doCopy() {
         try {
@@ -889,7 +794,6 @@ async function openStickyNote() {
   }
 
   const copyBtnLabel = t('copy');
-  const copiedLabel = t('copied');
   const pinLabel = t('pinToTop');
   const hljsCssStickyInline = item.language ? getHljsCss() : '';
 
@@ -899,43 +803,71 @@ async function openStickyNote() {
 <meta charset="UTF-8">
 <title>ClipStash - ${pinLabel}</title>
 <style>
+  :root {
+    --bg: ${bgColor};
+    --text: ${textColor};
+    --text-secondary: ${isDark ? '#a1a2a6' : '#4b5563'};
+    --text-muted: ${mutedColor};
+    --bg-hover: ${btnHover};
+    --border: ${btnBorder};
+    --success: ${successColor};
+    --font-mono: ${fontMono};
+    --transition: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; -webkit-app-region: drag; }
   img { display: block; }
-  .sticky-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid ${btnBorder}; flex-shrink: 0; -webkit-app-region: drag; }
-  .sticky-title { font-size: 11px; color: ${mutedColor}; display: flex; align-items: center; gap: 4px; }
-  .sticky-title svg { color: #f59e0b; }
-  .sticky-actions { display: flex; gap: 4px; -webkit-app-region: no-drag; }
-  .sticky-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 3px 8px; border: 1px solid ${btnBorder}; border-radius: 4px; background: ${btnBg}; color: ${textColor}; font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.15s; }
-  .sticky-btn:hover { background: ${btnHover}; }
-  .sticky-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; }
-  .sticky-btn svg { width: 12px; height: 12px; }
-  .sticky-body { flex: 1; overflow: auto; padding: 10px 12px; }
+
+  /* Content area */
+  .sticky-body { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 12px 16px; -webkit-app-region: no-drag; }
   .sticky-body img { max-width: 100%; }
+
+  /* Shared toolbar (same rules as main.css .content-toolbar) */
+  .content-toolbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: flex-end; gap: 4px; pointer-events: none; height: 0; overflow: visible; }
+  .toolbar-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; transition: all var(--transition); pointer-events: auto; opacity: 0.45; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .toolbar-btn svg { width: 14px; height: 14px; }
+  body:hover .toolbar-btn { opacity: 0.85; }
+  .toolbar-btn:hover { opacity: 1 !important; background: var(--bg-hover); color: var(--text-secondary); border-color: var(--text-muted); }
+  .toolbar-btn.copied { opacity: 1 !important; background: var(--success); color: #fff; border-color: var(--success); }
+
+  /* Shared content formatting (same rules as main.css .content-text) */
+  .content-text { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text); margin: 0; padding: 0; background: transparent; tab-size: 4; }
+  .content-text code { font-family: inherit; font-size: inherit; line-height: inherit; display: block; white-space: pre-wrap; word-break: break-all; background: transparent !important; padding: 0 !important; tab-size: inherit; overflow-x: hidden; }
+  .content-text code.hljs { background: transparent !important; padding: 0 !important; overflow-x: hidden; }
+
+  /* Shared HTML content (same rules as main.css .content-html) */
+  .content-html { font-size: 12px; line-height: 1.6; color: var(--text); overflow: hidden; word-break: break-all; }
+  .content-html img { max-width: 100%; }
+
+  /* Scrollbar (same rules as main.css) */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
   ${hljsCssStickyInline}
+
+  /* Override hljs defaults that appear after our rules */
+  .content-text code.hljs { overflow-x: hidden !important; padding: 0 !important; white-space: pre-wrap !important; word-break: break-all !important; }
 </style>
 </head>
 <body>
-<div class="sticky-header">
-  <div class="sticky-title">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/><path d="M15 3v5a1 1 0 0 0 1 1h5"/></svg>
-    ${pinLabel}
-  </div>
-  <div class="sticky-actions">
-    <button class="sticky-btn" onclick="doCopy()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-      <span id="copy-text">${copyBtnLabel}</span>
+<div class="sticky-body">
+  <div class="content-toolbar">
+    <button class="toolbar-btn" onclick="doCopy()" title="${copyBtnLabel}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
     </button>
   </div>
+  ${bodyContent}
 </div>
-${bodyContent}
 <script>
+  const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>';
   function showCopyOk() {
-    const btn = document.querySelector('.sticky-btn');
-    const txt = document.getElementById('copy-text');
+    const btn = document.querySelector('.toolbar-btn');
     btn.classList.add('copied');
-    txt.textContent = '${copiedLabel}';
-    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
+    btn.innerHTML = ICON_CHECK;
+    setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = ICON_COPY; }, 1500);
   }
   ${copyDataScript}
 </script>
@@ -1191,70 +1123,131 @@ modalLangSelect.addEventListener('change', async () => {
   await refreshList();
 });
 
-// Edit mode toggle
-btnModalEdit.addEventListener('click', async () => {
-  if (!currentModalData) return;
+// Edit mode: enter
+btnModalEdit.addEventListener('click', () => {
+  if (!currentModalData || isEditMode) return;
+  enterEditMode();
+});
 
-  if (!isEditMode) {
-    // Enter edit mode
-    isEditMode = true;
-    hasUnsavedChanges = false;
-    
-    // Calculate editor height to match content display area
-    // Subtract space for container margin (4px * 2) = 8px
-    const contentDisplayHeight = modalContent.offsetHeight || modalHtmlWrap.offsetHeight || 80;
-    const editorHeight = Math.max(80, Math.min(contentDisplayHeight - 8, 500));
-    
-    modalEditor.value = currentModalData.content || '';
-    modalEditor.style.height = `${editorHeight}px`;
-    modalEditorPreview.style.height = `${editorHeight}px`;
-    
-    modalContent.style.display = 'none';
-    modalHtmlWrap.style.display = 'none';
-    modalEditorContainer.style.display = 'block';
-    modalEditorContainer.classList.add('editing');
-    modalBody.classList.add('editing-mode');
-    
-    // Update initial highlight
-    updateEditorHighlight();
-    
-    // Don't auto-focus, just display content
-    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
-    btnModalEdit.title = t('save');
+function enterEditMode() {
+  isEditMode = true;
+  hasUnsavedChanges = false;
+
+  // Capture the view-mode content height before hiding it
+  const viewHeight = modalContent.offsetHeight || modalHtmlWrap.offsetHeight || 80;
+
+  modalEditor.value = currentModalData.content || '';
+
+  // Set textarea height to match the view-mode content height
+  // scrollHeight already includes padding, use it directly
+  modalEditor.style.height = 'auto';
+  const contentHeight = modalEditor.scrollHeight;
+  // Use whichever is larger: view-mode height or actual content height
+  const editorHeight = Math.max(viewHeight, contentHeight, 80);
+  modalEditor.style.height = `${editorHeight}px`;
+
+  modalContent.style.display = 'none';
+  modalHtmlWrap.style.display = 'none';
+  modalEditorContainer.style.display = 'block';
+  modalEditorContainer.classList.add('editing');
+  modalBody.classList.add('editing-mode');
+
+  // Show edit bar in header, hide ID badge and header actions (fullscreen/pin/close)
+  modalEditBar.style.display = 'flex';
+  modalHeaderId.style.display = 'none';
+  modalHeaderActions.style.display = 'none';
+
+  // Update initial highlight
+  updateEditorHighlight();
+}
+
+// Edit mode: save
+btnEditSave.addEventListener('click', saveEdit);
+
+async function saveEdit() {
+  if (!currentModalData || !isEditMode) return;
+
+  const newContent = modalEditor.value;
+  await updateCacheContent(currentModalData.id, newContent);
+  currentModalData.content = newContent;
+  currentModalData.contentLength = [...newContent].length;
+  exitEditMode();
+
+  // Re-render content with highlighting
+  const lang = currentModalData.language;
+  if (lang) {
+    modalCode.innerHTML = highlightCode(newContent, lang);
+    modalCode.className = 'hljs';
   } else {
-    // Save and exit edit mode
-    const newContent = modalEditor.value;
-    await updateCacheContent(currentModalData.id, newContent);
-    currentModalData.content = newContent;
-    currentModalData.contentLength = [...newContent].length;
-    isEditMode = false;
-    hasUnsavedChanges = false;
-    modalEditorContainer.style.display = 'none';
-    modalEditor.classList.remove('has-highlight');
-    modalEditorContainer.classList.remove('editing');
-    modalBody.classList.remove('editing-mode');
+    modalCode.textContent = newContent;
+    modalCode.className = '';
+  }
+  modalContent.style.display = 'block';
 
-    // Re-render content with highlighting
-    const lang = currentModalData.language;
-    if (lang) {
-      modalCode.innerHTML = highlightCode(newContent, lang);
+  // Update meta
+  const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
+  const metaText = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
+  modalMeta.textContent = metaText;
+  modalStatusMeta.textContent = metaText;
+
+  await refreshList();
+}
+
+// Edit mode: cancel
+btnEditCancel.addEventListener('click', () => {
+  if (!isEditMode) return;
+  if (hasUnsavedChanges) {
+    showConfirm(
+      t('unsavedTitle'),
+      t('unsavedDesc'),
+      t('discardChanges'),
+      () => {
+        hideConfirm();
+        cancelEdit();
+      }
+    );
+  } else {
+    cancelEdit();
+  }
+});
+
+function cancelEdit() {
+  if (!currentModalData) return;
+  exitEditMode();
+
+  // Restore original content display
+  const type = currentModalData.type || 'text';
+  if (type === 'html' && currentModalData.htmlContent) {
+    modalHtmlWrap.innerHTML = currentModalData.htmlContent;
+    modalHtmlWrap.style.display = 'block';
+    if (currentModalData.content) {
+      modalCode.textContent = currentModalData.content;
+      modalCode.className = '';
+      modalContent.style.display = 'block';
+    }
+  } else {
+    if (currentModalData.language) {
+      modalCode.innerHTML = highlightCode(currentModalData.content || '', currentModalData.language);
       modalCode.className = 'hljs';
     } else {
-      modalCode.textContent = newContent;
+      modalCode.textContent = currentModalData.content;
       modalCode.className = '';
     }
     modalContent.style.display = 'block';
-
-    // Update meta
-    const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
-    modalMeta.textContent = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
-
-    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-    btnModalEdit.title = t('edit');
-
-    await refreshList();
   }
-});
+}
+
+function exitEditMode() {
+  isEditMode = false;
+  hasUnsavedChanges = false;
+  modalEditorContainer.style.display = 'none';
+  modalEditor.classList.remove('has-highlight');
+  modalEditorContainer.classList.remove('editing');
+  modalBody.classList.remove('editing-mode');
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
+  modalHeaderActions.style.display = '';
+}
 
 // Real-time syntax highlighting in editor
 function updateEditorHighlight() {
@@ -1276,10 +1269,13 @@ function updateEditorHighlight() {
   }
 }
 
-// Track unsaved changes and update highlight
+// Track unsaved changes, update highlight, and auto-resize textarea
 modalEditor.addEventListener('input', () => {
   hasUnsavedChanges = true;
   updateEditorHighlight();
+  // Auto-resize textarea to fit content
+  modalEditor.style.height = 'auto';
+  modalEditor.style.height = `${Math.max(modalEditor.scrollHeight, 80)}px`;
 });
 
 // Sync scroll between editor and preview
@@ -1311,6 +1307,18 @@ tagInput.addEventListener('keydown', (e) => {
     tagInputWrap.style.display = 'none';
     tagSuggestions.style.display = 'none';
   }
+});
+
+// Close tag input on blur (delayed to allow clicking suggestions)
+tagInput.addEventListener('blur', () => {
+  setTimeout(() => {
+    // Only close if the focus didn't move to a suggestion item
+    if (!tagInputWrap.contains(document.activeElement)) {
+      tagInputWrap.style.display = 'none';
+      tagSuggestions.style.display = 'none';
+      tagInput.value = '';
+    }
+  }, 150);
 });
 
 // Keyboard shortcuts
@@ -1388,7 +1396,6 @@ btnSettings.addEventListener('click', async () => {
   toggleAutostart.checked = await getAutostart().catch(() => false);
   toggleClipboardMonitor.checked = await getClipboardMonitor().catch(() => false);
   toggleNotification.checked = currentSettings.showNotification;
-  toggleCloseToTray.checked = currentSettings.closeToTray;
 
   importStatus.style.display = 'none';
   shortcutRecording.style.display = 'none';
@@ -1510,13 +1517,6 @@ toggleClipboardMonitor.addEventListener('change', async () => {
 toggleNotification.addEventListener('change', async () => {
   if (currentSettings) {
     currentSettings.showNotification = toggleNotification.checked;
-    await saveSettings(currentSettings);
-  }
-});
-
-toggleCloseToTray.addEventListener('change', async () => {
-  if (currentSettings) {
-    currentSettings.closeToTray = toggleCloseToTray.checked;
     await saveSettings(currentSettings);
   }
 });

@@ -37,7 +37,6 @@ export async function getSettings() {
       clipboardMonitor: false,
       autostart: false,
       showNotification: true,
-      closeToTray: true,
     };
   }
 }

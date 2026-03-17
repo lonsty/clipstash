@@ -36,6 +36,12 @@ pub fn write_clipboard(
 }
 
 #[tauri::command]
+pub fn get_cache_by_id(state: State<AppState>, id: String) -> Result<Option<CacheItem>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_cache_by_id(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_caches(state: State<AppState>, offset: i64, limit: i64) -> Result<Vec<CacheItem>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_caches(offset, limit).map_err(|e| e.to_string())
@@ -230,28 +236,18 @@ pub fn show_notification(app: tauri::AppHandle, title: String, body: String) -> 
 pub fn open_fullscreen_window(
     app: tauri::AppHandle,
     state: State<AppState>,
-    html_content: String,
+    item_id: String,
 ) -> Result<bool, String> {
     let label = format!("fullscreen_{}", db::generate_id());
 
-    // Write HTML to a temp file and use a proper file:// URL
-    let temp_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-    let temp_file = temp_dir.join(format!("{}.html", &label));
-    std::fs::write(&temp_file, &html_content).map_err(|e| e.to_string())?;
-
-    // Use url::Url::from_file_path for correct cross-platform file:// URLs
-    // (e.g. file:///C:/... on Windows, file:///Users/... on macOS)
-    let file_url = tauri::Url::from_file_path(&temp_file)
-        .map_err(|_| "failed to create file URL".to_string())?;
-
     // Suppress auto-hide so the main window stays visible while fullscreen is open
-    if let Ok(mut flag) = state.suppress_auto_hide.lock() {
-        *flag = true;
-    }
+    state.suppress_auto_hide_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    // Load the app's fullscreen.html page with the item ID as query parameter
+    let url = WebviewUrl::App(format!("fullscreen.html?id={}", item_id).into());
 
     // Build and show the fullscreen window
-    let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(file_url))
+    let window = WebviewWindowBuilder::new(&app, &label, url)
         .title("ClipStash - Fullscreen")
         .inner_size(900.0, 700.0)
         .center()
@@ -270,8 +266,14 @@ pub fn open_fullscreen_window(
 
 #[tauri::command]
 pub fn set_suppress_auto_hide(state: State<AppState>, suppress: bool) {
-    if let Ok(mut flag) = state.suppress_auto_hide.lock() {
-        *flag = suppress;
+    if suppress {
+        state.suppress_auto_hide_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    } else {
+        state.suppress_auto_hide_count.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |v| Some(v.saturating_sub(1))
+        ).ok();
     }
 }
 
@@ -291,9 +293,7 @@ pub fn open_sticky_window(
     let file_url = tauri::Url::from_file_path(&temp_file)
         .map_err(|_| "failed to create file URL".to_string())?;
 
-    if let Ok(mut flag) = state.suppress_auto_hide.lock() {
-        *flag = true;
-    }
+    state.suppress_auto_hide_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     // Build and show the sticky window
     let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(file_url))

@@ -59,12 +59,9 @@ jobs:
         run: npm install
 
       - name: Build and release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Skip macOS code signing (no Apple Developer certificate)
-          APPLE_SIGNING_IDENTITY: '-'
-          TAURI_SIGNING_IDENTITY: '-'
         with:
           projectPath: clipstash-desktop
           tagName: ${{ github.ref_name }}

@@ -24,6 +24,10 @@ export async function writeClipboard(type, content, htmlContent, imageDataUrl) {
 
 // ===== Cache CRUD =====
 
+export async function getCacheById(id) {
+  return await invoke('get_cache_by_id', { id });
+}
+
 export async function getCaches(offset = 0, limit = 12) {
   return await invoke('get_caches', { offset, limit });
 }
@@ -126,8 +130,8 @@ export async function showNotification(title, body) {
   return await invoke('show_notification', { title, body });
 }
 
-export async function openFullscreenWindow(htmlContent) {
-  return await invoke('open_fullscreen_window', { htmlContent });
+export async function openFullscreenWindow(itemId) {
+  return await invoke('open_fullscreen_window', { itemId });
 }
 
 export async function openStickyWindow(htmlContent) {
