@@ -6,6 +6,7 @@ use tauri::{
 
 /// setup_tray creates and configures the system tray icon and menu.
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    log::info!("Setting up tray");
     let open_settings =
         MenuItem::with_id(app, "open_settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;

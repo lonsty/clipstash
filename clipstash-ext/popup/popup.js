@@ -29,6 +29,7 @@ let isLoadingMore = false;
 let currentQuery = '';
 let currentModalData = null;
 let isEditMode = false;
+let hasUnsavedChanges = false;
 let confirmCallback = null;
 
 // DOM references
@@ -41,23 +42,35 @@ const btnSearchClear = document.getElementById('btn-search-clear');
 const statsBar = document.getElementById('stats-bar');
 const statsText = document.getElementById('stats-text');
 const modalOverlay = document.getElementById('modal-overlay');
+const modalBody = document.querySelector('.modal-body');
 const modalContent = document.getElementById('modal-content');
 const modalCode = document.getElementById('modal-code');
+const modalEditorContainer = document.getElementById('modal-editor-container');
 const modalEditor = document.getElementById('modal-editor');
+const modalEditorPreview = document.getElementById('modal-editor-preview');
+const modalEditorCode = document.getElementById('modal-editor-code');
 const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
 const modalHtmlWrap = document.getElementById('modal-html-wrap');
 const modalMeta = document.getElementById('modal-meta');
+const modalHeaderId = document.getElementById('modal-header-id');
+const modalEditBar = document.getElementById('modal-edit-bar');
+const modalHeaderActions = document.querySelector('.modal-header-actions');
+const modalStatusMeta = document.getElementById('modal-status-meta');
 const modalTagsSection = document.querySelector('.modal-tags-section');
 const modalTagsEl = document.getElementById('modal-tags');
 const btnAddTag = document.getElementById('btn-add-tag');
 const tagInputWrap = document.getElementById('tag-input-wrap');
 const tagInput = document.getElementById('tag-input');
 const tagSuggestions = document.getElementById('tag-suggestions');
+const modalContentToolbar = document.getElementById('modal-content-toolbar');
 const btnModalClose = document.getElementById('btn-modal-close');
 const btnModalCopy = document.getElementById('btn-modal-copy');
 const btnModalFullscreen = document.getElementById('btn-modal-fullscreen');
+const btnModalPin = document.getElementById('btn-modal-pin');
 const btnModalEdit = document.getElementById('btn-modal-edit');
+const btnEditCancel = document.getElementById('btn-edit-cancel');
+const btnEditSave = document.getElementById('btn-edit-save');
 const modalLangSelect = document.getElementById('modal-lang-select');
 const btnClearAll = document.getElementById('btn-clear-all');
 const confirmOverlay = document.getElementById('confirm-overlay');
@@ -234,21 +247,20 @@ function renderModalTags() {
 
   modalTagsEl.innerHTML = '';
 
-  if (tags.length > 0) {
-    modalTagsEl.style.display = 'flex';
-    modalTagsSection.classList.remove('no-tags');
-    for (const tag of tags) {
-      modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
-        const newTags = currentModalData.tags.filter(x => x !== tg);
-        await updateCacheTags(currentModalData.id, newTags);
-        currentModalData.tags = newTags;
-        renderModalTags();
-        await refreshList();
-      }));
-    }
-  } else {
-    modalTagsEl.style.display = 'none';
-    modalTagsSection.classList.add('no-tags');
+  for (const tag of tags) {
+    modalTagsEl.appendChild(renderTagBadge(tag, true, async (tg) => {
+      const newTags = currentModalData.tags.filter(x => x !== tg);
+      await updateCacheTags(currentModalData.id, newTags);
+      currentModalData.tags = newTags;
+      renderModalTags();
+      await refreshList();
+    }));
+  }
+
+  // Show text label on add-tag button only when no tags exist
+  const addTagLabel = btnAddTag.querySelector('.btn-add-tag-label');
+  if (addTagLabel) {
+    addTagLabel.style.display = tags.length === 0 ? '' : 'none';
   }
 }
 
@@ -279,7 +291,10 @@ async function addTagToCurrentItem(tagName) {
   const name = tagName.trim();
   if (!name || name.length > MAX_TAG_LENGTH) return;
   const tags = currentModalData.tags || [];
-  if (tags.includes(name)) return;
+  if (tags.includes(name)) {
+    showTagExistsHint(tagInput, tagInputWrap);
+    return;
+  }
   tags.push(name);
   await updateCacheTags(currentModalData.id, tags);
   currentModalData.tags = tags;
@@ -288,6 +303,25 @@ async function addTagToCurrentItem(tagName) {
   tagSuggestions.style.display = 'none';
   tagInputWrap.style.display = 'none';
   await refreshList();
+}
+
+function showTagExistsHint(inputEl, wrapEl) {
+  const oldHint = wrapEl.querySelector('.tag-exists-hint');
+  if (oldHint) oldHint.remove();
+
+  inputEl.classList.remove('tag-exists');
+  void inputEl.offsetWidth;
+  inputEl.classList.add('tag-exists');
+
+  const hint = document.createElement('div');
+  hint.className = 'tag-exists-hint';
+  hint.textContent = t('tagExists');
+  wrapEl.appendChild(hint);
+
+  setTimeout(() => {
+    inputEl.classList.remove('tag-exists');
+    hint.remove();
+  }, 2000);
 }
 
 // ===== Card Rendering =====
@@ -492,11 +526,11 @@ async function copyToClipboard(data, btnEl) {
   } catch {
     // Fallback: plain text copy using modern clipboard API
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(data.content || '');
     } catch {
       // Legacy fallback with execCommand (deprecated but still works)
       const textarea = document.createElement('textarea');
-      textarea.value = text;
+      textarea.value = data.content || '';
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
       document.body.appendChild(textarea);
@@ -548,17 +582,27 @@ function showCopyFeedback(btnEl) {
 function openModal(item) {
   currentModalData = item;
   isEditMode = false;
+  hasUnsavedChanges = false;
   const type = item.type || 'text';
 
   // Reset all content areas
   modalContent.style.display = 'none';
   modalImageWrap.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
-  modalEditor.style.display = 'none';
+  modalEditorContainer.style.display = 'none';
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
 
-  // Reset edit button state
-  btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-  btnModalEdit.title = t('edit');
+  // Show header actions (fullscreen/pin/close)
+  modalHeaderActions.style.display = '';
+
+  // Set header ID badge (random hex part after underscore)
+  const idStr = String(item.id);
+  const shortId = idStr.includes('_') ? idStr.split('_').pop() : idStr.slice(0, 8);
+  modalHeaderId.textContent = `#${shortId}`;
+
+  // Update pin button state
+  updatePinButton(item.pinned);
 
   // Show/hide edit & language controls based on type
   btnModalEdit.style.display = (type === 'image') ? 'none' : 'inline-flex';
@@ -570,13 +614,9 @@ function openModal(item) {
     modalImage.alt = t('imageAlt');
     modalImageWrap.style.display = 'block';
   } else if (type === 'html' && item.htmlContent) {
-    // Sanitize HTML content using DOMPurify if available, or display as text
-    if (typeof DOMPurify !== 'undefined') {
-      modalHtmlWrap.innerHTML = DOMPurify.sanitize(item.htmlContent);
-    } else {
-      // Fallback: display as escaped text if DOMPurify is not available
-      modalHtmlWrap.textContent = item.htmlContent;
-    }
+    // XSS sanitization for HTML content
+    const sanitized = sanitizeHtml(item.htmlContent);
+    modalHtmlWrap.innerHTML = sanitized;
     modalHtmlWrap.style.display = 'block';
     if (item.content) {
       modalCode.textContent = item.content;
@@ -594,10 +634,13 @@ function openModal(item) {
     modalContent.style.display = 'block';
   }
 
+  // Meta info
   const sizeInfo = type === 'image'
     ? `${t('typeImage')} · ${formatBytes(estimateDataUrlBytes(item.imageDataUrl))}`
     : `${item.contentLength} ${t('chars')}`;
-  modalMeta.textContent = `${sizeInfo} · ${formatFullTime(item.createdAt)}`;
+  const metaText = `${sizeInfo} · ${formatFullTime(item.createdAt)}`;
+  modalMeta.textContent = metaText;
+  modalStatusMeta.textContent = metaText;
 
   renderModalTags();
   tagInputWrap.style.display = 'none';
@@ -606,136 +649,186 @@ function openModal(item) {
   modalOverlay.style.display = 'flex';
 }
 
+function updatePinButton(pinned) {
+  if (pinned) {
+    btnModalPin.innerHTML = ICON_PIN_FILLED;
+    btnModalPin.classList.add('is-pinned');
+    btnModalPin.title = t('unpin');
+  } else {
+    btnModalPin.innerHTML = ICON_PIN;
+    btnModalPin.classList.remove('is-pinned');
+    btnModalPin.title = t('pin');
+  }
+}
+
 function closeModal() {
+  if (isEditMode && hasUnsavedChanges) {
+    showConfirm(
+      t('unsavedTitle'),
+      t('unsavedDesc'),
+      t('discardChanges'),
+      () => {
+        hideConfirm();
+        doCloseModal();
+      }
+    );
+    return;
+  }
+  doCloseModal();
+}
+
+function doCloseModal() {
   modalOverlay.style.display = 'none';
   currentModalData = null;
   isEditMode = false;
-  modalEditor.style.display = 'none';
+  hasUnsavedChanges = false;
+  modalEditorContainer.style.display = 'none';
+  modalEditor.classList.remove('has-highlight');
+  modalEditorContainer.classList.remove('editing');
+  modalBody.classList.remove('editing-mode');
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
+  modalHeaderActions.style.display = '';
   tagInputWrap.style.display = 'none';
   tagSuggestions.style.display = 'none';
 }
 
+// ===== Edit Mode (three-function architecture) =====
+
+function enterEditMode() {
+  if (!currentModalData || currentModalData.type === 'image') return;
+  isEditMode = true;
+  hasUnsavedChanges = false;
+
+  // Capture the view-mode content height before hiding it
+  const viewHeight = modalContent.offsetHeight || modalHtmlWrap.offsetHeight || 80;
+
+  modalEditor.value = currentModalData.content || '';
+
+  // Set textarea height to match the view-mode content height
+  modalEditor.style.height = 'auto';
+  const contentHeight = modalEditor.scrollHeight;
+  const editorHeight = Math.max(viewHeight, contentHeight, 80);
+  modalEditor.style.height = `${editorHeight}px`;
+
+  modalContent.style.display = 'none';
+  modalHtmlWrap.style.display = 'none';
+  modalEditorContainer.style.display = 'block';
+  modalEditorContainer.classList.add('editing');
+  modalBody.classList.add('editing-mode');
+
+  // Show edit bar in header, hide ID badge and header actions
+  modalEditBar.style.display = 'flex';
+  modalHeaderId.style.display = 'none';
+  modalHeaderActions.style.display = 'none';
+
+  // Update initial highlight
+  updateEditorHighlight();
+}
+
+async function saveEdit() {
+  if (!currentModalData || !isEditMode) return;
+
+  const newContent = modalEditor.value;
+  await updateCacheContent(currentModalData.id, newContent);
+  currentModalData.content = newContent;
+  currentModalData.contentLength = [...newContent].length;
+  exitEditMode();
+
+  // Re-render content with highlighting
+  const lang = currentModalData.language;
+  if (lang) {
+    modalCode.innerHTML = highlightCode(newContent, lang);
+    modalCode.className = 'hljs';
+  } else {
+    modalCode.textContent = newContent;
+    modalCode.className = '';
+  }
+  modalContent.style.display = 'block';
+
+  // Update meta
+  const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
+  const metaText = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
+  modalMeta.textContent = metaText;
+  modalStatusMeta.textContent = metaText;
+
+  await refreshList();
+}
+
+function cancelEdit() {
+  if (!currentModalData) return;
+  exitEditMode();
+
+  // Restore original content display
+  const type = currentModalData.type || 'text';
+  if (type === 'html' && currentModalData.htmlContent) {
+    const sanitized = sanitizeHtml(currentModalData.htmlContent);
+    modalHtmlWrap.innerHTML = sanitized;
+    modalHtmlWrap.style.display = 'block';
+    if (currentModalData.content) {
+      modalCode.textContent = currentModalData.content;
+      modalCode.className = '';
+      modalContent.style.display = 'block';
+    }
+  } else {
+    const lang = currentModalData.language;
+    if (lang) {
+      modalCode.innerHTML = highlightCode(currentModalData.content || '', lang);
+      modalCode.className = 'hljs';
+    } else {
+      modalCode.textContent = currentModalData.content;
+      modalCode.className = '';
+    }
+    modalContent.style.display = 'block';
+  }
+}
+
+function exitEditMode() {
+  isEditMode = false;
+  hasUnsavedChanges = false;
+  modalEditorContainer.style.display = 'none';
+  modalEditor.classList.remove('has-highlight');
+  modalEditorContainer.classList.remove('editing');
+  modalBody.classList.remove('editing-mode');
+  modalEditBar.style.display = 'none';
+  modalHeaderId.style.display = '';
+  modalHeaderActions.style.display = '';
+}
+
+function updateEditorHighlight() {
+  if (!isEditMode || !currentModalData) return;
+
+  const lang = currentModalData.language;
+  const content = modalEditor.value;
+
+  if (lang && typeof window.hljs !== 'undefined') {
+    modalEditor.classList.add('has-highlight');
+    const highlighted = highlightCode(content, lang);
+    modalEditorCode.innerHTML = highlighted;
+    modalEditorCode.className = 'hljs';
+  } else {
+    modalEditor.classList.add('has-highlight');
+    modalEditorCode.textContent = content;
+    modalEditorCode.className = '';
+  }
+}
+
+// ===== XSS Sanitization =====
+
+function sanitizeHtml(html) {
+  if (typeof DOMPurify !== 'undefined') {
+    return DOMPurify.sanitize(html);
+  }
+  // Fallback: strip script tags
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<script\b/gi, '&lt;script');
+}
+
 function openFullscreen() {
   if (!currentModalData) return;
-  const item = currentModalData;
-  const type = item.type || 'text';
-  const isDark = currentTheme === 'dark' ||
-    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const bgColor = isDark ? '#1a1b1e' : '#ffffff';
-  const textColor = isDark ? '#e4e5e7' : '#111827';
-  const btnBg = isDark ? '#25262b' : '#f1f5f9';
-  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
-  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
-  const successColor = '#22c55e';
-  const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
-
-  let bodyContent = '';
-  let copyDataScript = '';
-
-  if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="position:relative;margin:16px;padding:16px;min-height:calc(100vh - 32px);border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);display:flex;align-items:center;justify-content:center;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:calc(100vh - 64px);object-fit:contain;">
-    </div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const img = document.querySelector('img');
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          canvas.toBlob(async (blob) => {
-            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
-            showCopyOk();
-          }, 'image/png');
-        } catch { showCopyOk(); }
-      }`;
-  } else if (type === 'html' && item.htmlContent) {
-    const escapedHtml = item.htmlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    const escapedText = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    // Sanitize HTML before inserting (for fullscreen view)
-    const sanitizedHtml = typeof DOMPurify !== 'undefined' 
-      ? DOMPurify.sanitize(item.htmlContent)
-      : escapeHtml(item.htmlContent);
-    bodyContent = `<div style="margin:16px;padding:16px;font-size:15px;line-height:1.8;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);">
-      ${sanitizedHtml}
-    </div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const htmlStr = \`${escapedHtml}\`;
-          const textStr = \`${escapedText}\`;
-          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
-          const textBlob = new Blob([textStr], {type: 'text/plain'});
-          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
-          showCopyOk();
-        } catch {
-          await navigator.clipboard.writeText(\`${escapedText}\`);
-          showCopyOk();
-        }
-      }`;
-  } else {
-    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
-    const codeClass = item.language ? ' class="hljs"' : '';
-    const escapedForJs = (item.content || '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-    bodyContent = `<pre style="margin:16px;padding:16px;font-family:${fontMono};font-size:13px;line-height:1.7;white-space:pre-wrap;word-break:break-all;border:1px solid ${btnBorder};border-radius:8px;background:${bgColor};box-shadow:0 4px 12px rgba(0,0,0,0.1);"><code${codeClass}>${escaped}</code></pre>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          await navigator.clipboard.writeText(\`${escapedForJs}\`);
-          showCopyOk();
-        } catch {}
-      }`;
-  }
-
-  const copyBtnLabel = t('copy');
-  const copiedLabel = t('copied');
-  const hljsCssInline = item.language ? getHljsCss() : '';
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>ClipStash - ${t('fullscreen')}</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: ${bgColor}; color: ${textColor}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-  img { display: block; }
-  code { padding: 0 !important; background: transparent !important; display: block; }
-  code.hljs { padding: 0 !important; background: transparent !important; }
-  .toolbar { position: fixed; top: 28px; right: 28px; z-index: 10; display: flex; gap: 8px; }
-  .copy-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border: 1px solid ${btnBorder}; border-radius: 6px; background: ${btnBg}; color: ${textColor}; font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.2s; opacity: 0.5; backdrop-filter: blur(8px); }
-  .copy-btn:hover { background: ${btnHover}; opacity: 1; }
-  .copy-btn.copied { background: ${successColor}; color: #fff; border-color: ${successColor}; opacity: 1; }
-  .copy-btn svg { width: 14px; height: 14px; }
-  ${hljsCssInline}
-</style>
-</head>
-<body>
-<div class="toolbar">
-  <button class="copy-btn" onclick="doCopy()">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    <span id="copy-text">${copyBtnLabel}</span>
-  </button>
-</div>
-${bodyContent}
-<script>
-  function showCopyOk() {
-    const btn = document.querySelector('.copy-btn');
-    const txt = document.getElementById('copy-text');
-    btn.classList.add('copied');
-    txt.textContent = '${copiedLabel}';
-    setTimeout(() => { btn.classList.remove('copied'); txt.textContent = '${copyBtnLabel}'; }, 1500);
-  }
-  ${copyDataScript}
-</script>
-</body>
-</html>`;
-
-  const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  window.open(url, '_blank');
+  const url = chrome.runtime.getURL(`fullscreen/fullscreen.html?id=${encodeURIComponent(currentModalData.id)}`);
+  chrome.tabs.create({ url });
 }
 
 // ===== Search =====
@@ -844,6 +937,51 @@ btnModalCopy.addEventListener('click', () => {
 });
 btnModalFullscreen.addEventListener('click', openFullscreen);
 
+// Pin in modal
+btnModalPin.addEventListener('click', async () => {
+  if (!currentModalData) return;
+  await togglePin(currentModalData.id);
+  currentModalData.pinned = !currentModalData.pinned;
+  updatePinButton(currentModalData.pinned);
+  await refreshList();
+});
+
+// Edit mode (three-function architecture)
+btnModalEdit.addEventListener('click', enterEditMode);
+btnEditCancel.addEventListener('click', () => {
+  if (!isEditMode) return;
+  if (hasUnsavedChanges) {
+    showConfirm(
+      t('unsavedTitle'),
+      t('unsavedDesc'),
+      t('discardChanges'),
+      () => {
+        hideConfirm();
+        cancelEdit();
+      }
+    );
+  } else {
+    cancelEdit();
+  }
+});
+btnEditSave.addEventListener('click', saveEdit);
+
+// Editor input: track changes + highlight + auto-resize
+modalEditor.addEventListener('input', () => {
+  hasUnsavedChanges = true;
+  updateEditorHighlight();
+  modalEditor.style.height = 'auto';
+  modalEditor.style.height = `${Math.max(modalEditor.scrollHeight, 80)}px`;
+});
+
+// Sync scroll between editor and preview
+modalEditor.addEventListener('scroll', () => {
+  if (modalEditorPreview) {
+    modalEditorPreview.scrollTop = modalEditor.scrollTop;
+    modalEditorPreview.scrollLeft = modalEditor.scrollLeft;
+  }
+});
+
 // Language selector
 modalLangSelect.addEventListener('change', async () => {
   if (!currentModalData) return;
@@ -862,47 +1000,6 @@ modalLangSelect.addEventListener('change', async () => {
   await refreshList();
 });
 
-// Edit mode toggle
-btnModalEdit.addEventListener('click', async () => {
-  if (!currentModalData) return;
-
-  if (!isEditMode) {
-    isEditMode = true;
-    modalEditor.value = currentModalData.content || '';
-    modalContent.style.display = 'none';
-    modalHtmlWrap.style.display = 'none';
-    modalEditor.style.display = 'block';
-    modalEditor.focus();
-    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
-    btnModalEdit.title = t('save');
-  } else {
-    const newContent = modalEditor.value;
-    await updateCacheContent(currentModalData.id, newContent);
-    currentModalData.content = newContent;
-    currentModalData.contentLength = [...newContent].length;
-    isEditMode = false;
-    modalEditor.style.display = 'none';
-
-    const lang = currentModalData.language;
-    if (lang) {
-      modalCode.innerHTML = highlightCode(newContent, lang);
-      modalCode.className = 'hljs';
-    } else {
-      modalCode.textContent = newContent;
-      modalCode.className = '';
-    }
-    modalContent.style.display = 'block';
-
-    const sizeInfo = `${currentModalData.contentLength} ${t('chars')}`;
-    modalMeta.textContent = `${sizeInfo} · ${formatFullTime(currentModalData.createdAt)}`;
-
-    btnModalEdit.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
-    btnModalEdit.title = t('edit');
-
-    await refreshList();
-  }
-});
-
 // Tag input
 btnAddTag.addEventListener('click', () => {
   tagInputWrap.style.display = tagInputWrap.style.display === 'none' ? 'block' : 'none';
@@ -914,7 +1011,9 @@ btnAddTag.addEventListener('click', () => {
   }
 });
 
-tagInput.addEventListener('input', (e) => showTagSuggestions(e.target.value));
+tagInput.addEventListener('input', (e) => {
+  showTagSuggestions(e.target.value);
+});
 tagInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
@@ -924,6 +1023,14 @@ tagInput.addEventListener('keydown', (e) => {
     tagInputWrap.style.display = 'none';
     tagSuggestions.style.display = 'none';
   }
+});
+
+// Tag input auto-close on blur (150ms delay to avoid click conflicts)
+tagInput.addEventListener('blur', () => {
+  setTimeout(() => {
+    tagInputWrap.style.display = 'none';
+    tagSuggestions.style.display = 'none';
+  }, 150);
 });
 
 // Keyboard shortcuts

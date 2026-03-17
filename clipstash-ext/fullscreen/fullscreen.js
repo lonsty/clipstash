@@ -1,15 +1,14 @@
-// ClipStash Fullscreen Page - Interaction logic
+// ClipStash Extension Fullscreen Page - Interaction logic
 // Mirrors the modal detail view but in a standalone fullscreen window.
-// Does NOT include the header's fullscreen/pin/close triangle buttons.
+// Uses chrome.storage to load data instead of Tauri IPC.
 
 import {
   updateCacheTags, updateCacheContent, updateCacheLanguage,
-  getAllTags, getSettings, getTheme, formatBytes
+  getAllTags, formatBytes, getCaches, getTheme
 } from '../utils/storage.js';
 import { formatFullTime } from '../utils/time.js';
 import { initLang, getLang, t } from '../utils/i18n.js';
-
-const { invoke } = window.__TAURI__.core;
+import { MAX_TAG_LENGTH, THEME_SYSTEM } from '../utils/constants.js';
 
 // ===== State =====
 
@@ -70,6 +69,16 @@ function highlightCode(text, language) {
   }
 }
 
+function sanitizeHtml(html) {
+  if (typeof DOMPurify !== 'undefined') {
+    return DOMPurify.sanitize(html);
+  }
+  // Fallback: strip script tags
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<script\b/gi, '&lt;script');
+}
+
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -86,7 +95,7 @@ function estimateDataUrlBytes(dataUrl) {
 
 // ===== Theme =====
 
-let currentTheme = 'system';
+let currentTheme = THEME_SYSTEM;
 
 function applyTheme(theme) {
   currentTheme = theme;
@@ -95,7 +104,7 @@ function applyTheme(theme) {
     (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const hljsThemeEl = document.getElementById('hljs-theme');
   if (hljsThemeEl) {
-    hljsThemeEl.href = isDark ? 'vendor/hljs-dark.css' : 'vendor/hljs-light.css';
+    hljsThemeEl.href = isDark ? '../vendor/hljs-dark.css' : '../vendor/hljs-light.css';
   }
 }
 
@@ -201,7 +210,7 @@ async function showTagSuggestions(value) {
 async function addTagToItem(tagName) {
   if (!currentItem) return;
   const name = tagName.trim();
-  if (!name || name.length > 20) return;
+  if (!name || name.length > MAX_TAG_LENGTH) return;
   const tags = currentItem.tags || [];
   if (tags.includes(name)) {
     showTagExistsHint(fsTagInput, fsTagInputWrap);
@@ -239,22 +248,51 @@ function showTagExistsHint(inputEl, wrapEl) {
 
 async function copyToClipboard(data, btnEl) {
   try {
-    const type = data.type || 'text';
-    await invoke('write_clipboard', {
-      contentType: type,
-      content: data.content || '',
-      htmlContent: data.htmlContent || null,
-      imageDataUrl: data.imageDataUrl || null,
-    });
+    if (data.type === 'image' && data.imageDataUrl) {
+      const resp = await fetch(data.imageDataUrl);
+      const blob = await resp.blob();
+      const pngBlob = blob.type === 'image/png'
+        ? blob
+        : await convertToPngBlob(data.imageDataUrl);
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': pngBlob })
+      ]);
+    } else if (data.type === 'html' && data.htmlContent) {
+      const htmlBlob = new Blob([data.htmlContent], { type: 'text/html' });
+      const textBlob = new Blob([data.content || ''], { type: 'text/plain' });
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': htmlBlob,
+          'text/plain': textBlob
+        })
+      ]);
+    } else {
+      await navigator.clipboard.writeText(data.content || '');
+    }
     showCopyFeedback(btnEl);
   } catch {
     try {
       await navigator.clipboard.writeText(data.content || '');
-      showCopyFeedback(btnEl);
     } catch {
       // Silent fail
     }
+    showCopyFeedback(btnEl);
   }
+}
+
+function convertToPngBlob(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob((blob) => resolve(blob), 'image/png');
+    };
+    img.src = dataUrl;
+  });
 }
 
 function showCopyFeedback(btnEl) {
@@ -298,7 +336,8 @@ function renderContent(item) {
     fsImage.alt = t('imageAlt');
     fsImageWrap.style.display = 'block';
   } else if (type === 'html' && item.htmlContent) {
-    fsHtmlWrap.innerHTML = item.htmlContent;
+    const sanitized = sanitizeHtml(item.htmlContent);
+    fsHtmlWrap.innerHTML = sanitized;
     fsHtmlWrap.style.display = 'block';
     if (item.content) {
       fsCode.textContent = item.content;
@@ -398,7 +437,8 @@ function cancelEdit() {
   // Restore original content display
   const type = currentItem.type || 'text';
   if (type === 'html' && currentItem.htmlContent) {
-    fsHtmlWrap.innerHTML = currentItem.htmlContent;
+    const sanitized = sanitizeHtml(currentItem.htmlContent);
+    fsHtmlWrap.innerHTML = sanitized;
     fsHtmlWrap.style.display = 'block';
     if (currentItem.content) {
       fsCode.textContent = currentItem.content;
@@ -585,6 +625,13 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ===== Load Item from chrome.storage =====
+
+async function getCacheById(id) {
+  const caches = await getCaches();
+  return caches.find(c => c.id === id) || null;
+}
+
 // ===== Init =====
 
 async function init() {
@@ -596,20 +643,19 @@ async function init() {
     return;
   }
 
-  // Load settings for language & theme
-  const settings = await getSettings();
-  initLang(settings.language || 'en');
+  // Load language
+  await initLang();
 
-  const theme = await getTheme();
-  applyTheme(theme);
+  // Load theme
+  try {
+    const theme = await getTheme();
+    applyTheme(theme);
+  } catch {
+    applyTheme('system');
+  }
 
   // Load the cache item by ID
-  try {
-    currentItem = await invoke('get_cache_by_id', { id: itemId });
-  } catch (err) {
-    document.body.textContent = `Error loading item: ${err}`;
-    return;
-  }
+  currentItem = await getCacheById(itemId);
 
   if (!currentItem) {
     document.body.textContent = 'Item not found';

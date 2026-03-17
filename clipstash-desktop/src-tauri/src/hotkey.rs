@@ -15,7 +15,10 @@ pub fn register_custom_hotkey(app: &tauri::AppHandle, keys: &str) -> Result<bool
     // Unregister all existing shortcuts first
     global_shortcut.unregister_all().map_err(|e| e.to_string())?;
 
-    let shortcut = Shortcut::from_str(keys).map_err(|e| e.to_string())?;
+    let shortcut = Shortcut::from_str(keys).map_err(|e| {
+        log::error!("Failed to parse hotkey {}: {}", keys, e);
+        e.to_string()
+    })?;
     let app_handle = app.clone();
 
     global_shortcut
@@ -24,7 +27,11 @@ pub fn register_custom_hotkey(app: &tauri::AppHandle, keys: &str) -> Result<bool
                 app_handle.emit("hotkey-cache-clipboard", ()).ok();
             }
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("Failed to register hotkey {}: {}", keys, e);
+            e.to_string()
+        })?;
 
+    log::info!("Registered hotkey: keys={}", keys);
     Ok(true)
 }

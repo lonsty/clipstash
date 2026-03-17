@@ -87,7 +87,8 @@ export async function readClipboardViaScript(tabId) {
       return results[0].result;
     }
     return null;
-  } catch {
+  } catch (error) {
+    console.error('Failed to read clipboard via script:', error);
     return null;
   }
 }
@@ -113,7 +114,8 @@ export async function readClipboardViaOffscreen() {
     const response = await chrome.runtime.sendMessage({ action: 'read-clipboard-offscreen' });
     const text = response?.text || null;
     return text ? { type: 'text', content: text } : null;
-  } catch {
+  } catch (error) {
+    console.error('Failed to read clipboard via offscreen:', error);
     return null;
   }
 }

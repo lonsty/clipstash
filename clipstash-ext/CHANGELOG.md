@@ -5,24 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.1.3
+## [0.1.3] - 2026-03-20
+
+### Added
+
+- **Fullscreen page** — open cache content in a new browser tab with full-width layout; supports text, code (syntax highlighting), images, and HTML
+- **Inline editing (fullscreen)** — edit text content directly in fullscreen page with real-time syntax highlighting preview, auto-grow textarea, and synchronized scrolling
+- **Floating toolbar** — copy and edit buttons float at top-right of content area with backdrop blur; three-level progressive opacity (0.25 → 0.75 → 1) to avoid obscuring text
+- **Edit mode indicator bar** — header switches to green "✏️ Editing" bar with explicit Cancel / Save buttons when editing
+- **Unsaved changes confirmation** — cancelling edit with unsaved changes shows a confirmation dialog
+- **Card ID badge** — modal header displays `#shortID` (random hex suffix) in monospace badge style
+- **Tag duplicate detection** — input shakes with red border and "Tag already exists" hint when adding a duplicate tag
+- **Tag input auto-close** — tag input field auto-closes on blur (150ms delay to avoid click conflicts)
+- **Constants module** — extracted all magic numbers and config values to `constants.js`
+- **Error handling** — comprehensive `console.error` logging for all storage operations (`addCache`, `removeCache`, `clearAllCaches`, `updateCacheTags`, `togglePin`, `updateCacheContent`, `updateCacheLanguage`, `saveTheme`, `exportCaches`, `importCaches`), clipboard reading (`readClipboardViaScript`, `readClipboardViaOffscreen`), and cache workflow (`cacheClipboard` with red ✗ badge on failure)
+- **Public API** — exported `getCaches` function for external use
+- **i18n keys** — added `fullscreen`, `edit`, `editing`, `cancelEdit`, `saveEdit`, `save`, `syntaxLang`, `addTagHint`, `tagExists`, `unsavedTitle`, `unsavedDesc`, `discardChanges`
+
+### Changed
+
+- **Edit mode redesign** — replaced single toggle button with `enterEditMode()` / `saveEdit()` / `cancelEdit()` three-function architecture
+- **Modal footer removed** — copy/edit buttons moved to floating toolbar; meta info moved to bottom status bar
+- **Tags section redesign** — inline flow layout with `+` circle button (dashed border); shows "Add tag" text when empty, icon-only when tags exist
+- **Language selector relocated** — moved from tags section to status bar right side
+- **Multi-page style unification** — extracted shared CSS classes (`.content-toolbar`, `.toolbar-btn`) across modal and fullscreen pages
+- **Toolbar button opacity** — three-level progressive opacity: default 0.25 → content area hover 0.75 → button hover 1
+- **Code refactoring** — unified error handling patterns across all storage functions
+- **Clipboard API** — prioritize modern `navigator.clipboard` API with `execCommand` fallback
+- **Code organization** — imported constants from centralized module for better maintainabilityext-v0.1.3
+- **Build script** — added `fullscreen/` directory to build copy list
 
 ### Security
 
 - **[CRITICAL] SQL injection fix** — escaped LIKE special characters (`\`, `%`, `_`) in search queries
 - **[CRITICAL] XSS prevention** — added HTML sanitization with DOMPurify for safe rendering of HTML content
-
-### Added
-
-- **Constants module** — extracted all magic numbers and config values to `constants.js`
-- **Error handling** — comprehensive try-catch blocks and error logging for all async operations
-- **Public API** — exported `getCaches` function for external use
-
-### Changed
-
-- **Code refactoring** — unified error handling patterns across all storage functions
-- **Clipboard API** — prioritize modern `navigator.clipboard` API with `execCommand` fallback
-- **Code organization** — imported constants from centralized module for better maintainability
 
 ## [0.1.2] - 2026-03-10
 
@@ -78,5 +94,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Manifest V3** — supports Chrome 104+
 - **Zero dependencies** — pure frontend, no runtime dependencies, no network requests
 
+[0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

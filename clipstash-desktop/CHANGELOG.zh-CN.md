@@ -4,31 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.1.3] - 2026-03-17
-
-### 安全
-
-- **[严重] SQL 注入修复** — 在 `search_caches` 的 LIKE 条件中添加 `ESCAPE '\\'` 子句，防止查询注入
-- **XSS 消毒** — 全屏和便签页面的 HTML 注入现已消毒 `<script>` 标签，并转义 JS 字符串中的 `</script>`
-
-### 修复
-
-- **全屏后应用失去响应（Windows）** — 将 `suppress_auto_hide` 从 `Mutex<bool>` 替换为 `AtomicUsize` 引用计数器，消除多窗口场景下的死锁
-- **GitHub Actions Windows 构建失败** — 升级 `tauri-apps/tauri-action` 从 `@v0` 到 `@v0.5`；移除全局 `APPLE_SIGNING_IDENTITY` 和 `TAURI_SIGNING_IDENTITY` 环境变量
-- **Windows 全屏页面空白** — 修复 HTML 内容生成中的 JavaScript 字符串转义问题
-- **内联编辑器视觉一致性** — 编辑模式现在与查看模式布局完全匹配：文字宽度、位置和滚动行为一致
-- **编辑器光标对齐** — 同步 textarea 和语法高亮层的 overflow 行为和 tab-size
-- **全屏工具栏悬停失效** — 修复全屏页面工具栏按钮在 hover 时不显示的问题
-- **便签水平滚动条** — 禁止水平滚动，所有内容（文本、代码、HTML）自动换行适配窗口宽度
-- **编辑模式下删除** — 现在会检查未保存的修改，避免直接删除正在编辑的项目
-- **国际化翻译缺失** — 补充 `editing`、`cancelEdit`、`saveEdit`、`addTagHint`、`tagExists` 的中英文翻译
+## [0.1.3] - 2026-03-20
 
 ### 新增
 
+- **日志系统** — 集成 `tauri-plugin-log` 实现 Rust 后端和 JavaScript 前端的统一运行时日志记录；日志同时写入文件（`LogDir`）、标准输出和 Webview 控制台；记录的关键事件包括：应用启动、窗口创建/销毁、快捷键注册、剪贴板监控生命周期、导入导出操作及错误信息
+- **便签页面** — 新增专用 `sticky.html` + `sticky.js` 页面，通过 `WebviewUrl::App` 加载；便签窗口接收 `item_id` 并通过 Tauri 命令获取数据，与全屏窗口架构一致
 - **浮动工具栏** — 复制和编辑按钮浮动在内容区域右上角，带背景模糊效果，编辑模式下自动隐藏
 - **编辑模式指示条** — 进入编辑模式后 header 切换为绿色「✏️ 编辑中」指示条，配有明确的取消/保存按钮
 - **未保存变更确认** — 取消编辑时如有未保存修改，弹出确认对话框
-- **卡片 ID 标签** — 详情弹窗 header 左侧显示 `#短ID`（前 8 位字符），等宽字体标签样式
+- **卡片 ID 标签** — 详情弹窗 header 左侧显示 `#短ID`（随机 hex 后缀），等宽字体标签样式
 - **标签重复检测** — 输入已存在标签时，输入框红色边框抖动 + 显示"该标签已存在"提示
 - **标签输入自动关闭** — 标签输入框失焦后 150ms 自动关闭（延迟避免点击冲突）
 
@@ -45,7 +30,26 @@
 - **移除「关闭到托盘」设置** — 删除无效的 `closeToTray` 开关（行为不变：窗口失焦始终隐藏）
 - **编辑器高度行为** — 动态调整高度适应内容（取 `max(viewHeight, scrollHeight, 80)`），输入时自动增长
 - **错误处理** — 改进数据库操作的错误日志记录
+- **工具栏按钮透明度** — 三级渐进透明度：默认 0.25 → 内容区域悬停 0.75 → 按钮悬停 1，减少对文本的遮挡
 - **窗口权限** — 在 capabilities 配置中添加 `sticky_*` 窗口权限
+
+### 修复
+
+- **全屏后应用失去响应（Windows）** — 将 `suppress_auto_hide` 从 `Mutex<bool>` 替换为 `AtomicUsize` 引用计数器，消除多窗口场景下的死锁；将窗口创建（`WebviewWindowBuilder::build()`）移至后台线程，使 Tauri 命令处理器立即返回，防止新 WebView2 实例初始化时调用命令导致事件循环死锁
+- **GitHub Actions Windows 构建失败** — 升级 `tauri-apps/tauri-action` 从 `@v0` 到 `@v0.5`；移除全局 `APPLE_SIGNING_IDENTITY` 和 `TAURI_SIGNING_IDENTITY` 环境变量
+- **Windows 全屏页面空白** — 修复 HTML 内容生成中的 JavaScript 字符串转义问题
+- **Windows 便签页面空白** — 将 `data:` URI 方案替换为专门的 `sticky.html` 页面（通过 `WebviewUrl::App` 加载）；便签窗口现在接收 `item_id` 而非原始 HTML，通过 Tauri 命令获取数据，与全屏窗口架构一致
+- **内联编辑器视觉一致性** — 编辑模式现在与查看模式布局完全匹配：文字宽度、位置和滚动行为一致
+- **编辑器光标对齐** — 同步 textarea 和语法高亮层的 overflow 行为和 tab-size
+- **全屏工具栏悬停失效** — 修复全屏页面工具栏按钮在 hover 时不显示的问题
+- **便签水平滚动条** — 禁止水平滚动，所有内容（文本、代码、HTML）自动换行适配窗口宽度
+- **编辑模式下删除** — 现在会检查未保存的修改，避免直接删除正在编辑的项目
+- **国际化翻译缺失** — 补充 `editing`、`cancelEdit`、`saveEdit`、`addTagHint`、`tagExists` 的中英文翻译
+
+### 安全
+
+- **[严重] SQL 注入修复** — 在 `search_caches` 的 LIKE 条件中添加 `ESCAPE '\\'` 子句，防止查询注入
+- **XSS 消毒** — 全屏和便签页面的 HTML 注入现已消毒 `<script>` 标签，并转义 JS 字符串中的 `</script>`
 
 ## [0.1.2] - 2026-03-10
 

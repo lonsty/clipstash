@@ -4,24 +4,40 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布] - v0.1.3
+## [0.1.3] - 2026-03-20
+
+### 新增
+
+- **全屏页面** — 在新标签页中全屏展示缓存内容，支持文本、代码（语法高亮）、图片和 HTML 富文本
+- **全屏内联编辑** — 在全屏页面直接编辑文本，实时语法高亮预览、自动增长输入框、同步滚动
+- **浮动工具栏** — 复制和编辑按钮浮动在内容区域右上角，带背景模糊效果；三级渐进透明度（0.25 → 0.75 → 1）避免遮挡文本
+- **编辑模式指示条** — 进入编辑模式后 header 切换为绿色「✏️ 编辑中」指示条，配有明确的取消/保存按钮
+- **未保存变更确认** — 取消编辑时如有未保存修改，弹出确认对话框
+- **卡片 ID 标签** — 详情弹窗 header 显示 `#短ID`（随机 hex 后缀），等宽字体标签样式
+- **标签重复检测** — 输入已存在标签时，输入框红色边框抖动 + 显示「该标签已存在」提示
+- **标签输入自动关闭** — 标签输入框失焦后 150ms 自动关闭（延迟避免点击冲突）
+- **常量模块** — 提取所有魔法数字和配置值到 `constants.js`
+- **错误处理** — 为所有存储操作（`addCache`、`removeCache`、`clearAllCaches`、`updateCacheTags`、`togglePin`、`updateCacheContent`、`updateCacheLanguage`、`saveTheme`、`exportCaches`、`importCaches`）、剪贴板读取（`readClipboardViaScript`、`readClipboardViaOffscreen`）和缓存流程（`cacheClipboard` 失败时显示红色 ✗ badge）添加完整的 `console.error` 日志
+- **公共 API** — 导出 `getCaches` 函数供外部使用
+- **国际化** — 新增 `fullscreen`、`edit`、`editing`、`cancelEdit`、`saveEdit`、`save`、`syntaxLang`、`addTagHint`、`tagExists`、`unsavedTitle`、`unsavedDesc`、`discardChanges` 翻译
+
+### 变更
+
+- **编辑模式重构** — 从单按钮 toggle 重构为 `enterEditMode()` / `saveEdit()` / `cancelEdit()` 三函数架构
+- **移除底部 footer** — 复制/编辑按钮移至浮动工具栏；统计信息移至底部状态栏
+- **标签区域重新设计** — 内联流式布局 + `+` 圆形按钮（虚线边框）；无标签时显示「+ 添加标签」，有标签时仅显示图标
+- **语言选择器迁移** — 从标签区域移至状态栏右侧
+- **多页面样式统一** — 提取共享 CSS 类（`.content-toolbar`、`.toolbar-btn`）统一 modal 和全屏页面
+- **工具栏按钮透明度** — 三级渐进透明度：默认 0.25 → 内容区域悬停 0.75 → 按钮悬停 1
+- **代码重构** — 统一所有存储函数的错误处理模式
+- **剪切板 API** — 优先使用现代 `navigator.clipboard` API，降级到 `execCommand`
+- **代码组织** — 从集中化模块导入常量，提升可维护性
+- **构建脚本** — 将 `fullscreen/` 目录加入构建拷贝列表
 
 ### 安全
 
 - **[严重] SQL 注入修复** — 在搜索查询中转义 LIKE 特殊字符（`\`、`%`、`_`）
 - **[严重] XSS 防护** — 为 HTML 内容渲染添加 DOMPurify 清理机制
-
-### 新增
-
-- **常量模块** — 提取所有魔法数字和配置值到 `constants.js`
-- **错误处理** — 为所有异步操作添加完整的 try-catch 块和错误日志
-- **公共 API** — 导出 `getCaches` 函数供外部使用
-
-### 变更
-
-- **代码重构** — 统一所有存储函数的错误处理模式
-- **剪切板 API** — 优先使用现代 `navigator.clipboard` API，降级到 `execCommand`
-- **代码组织** — 从集中化模块导入常量，提升可维护性
 
 ## [0.1.2] - 2026-03-10
 
@@ -77,5 +93,6 @@
 - **Manifest V3** — 支持 Chrome 104+
 - **零依赖** — 纯前端实现，零运行时依赖，零网络请求
 
+[0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

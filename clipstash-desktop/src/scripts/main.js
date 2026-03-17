@@ -18,6 +18,7 @@ import {
   registerHotkey, showNotification, openFullscreenWindow, openStickyWindow, openUrl,
   setSuppressAutoHide, getAppVersion, updateTrayMenu,
 } from '../utils/bridge.js';
+import { info, warn, error, attachConsole, forwardConsole } from '../utils/logger.js';
 
 const PAGE_SIZE = 12;
 
@@ -135,16 +136,6 @@ function highlightCode(text, language) {
   } catch {
     return escapeHtml(text);
   }
-}
-
-// Inline hljs theme CSS for standalone HTML pages
-const HLJS_LIGHT_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#24292e;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#d73a49}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#6f42c1}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#005cc5}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#032f62}.hljs-built_in,.hljs-symbol{color:#e36209}.hljs-code,.hljs-comment,.hljs-formula{color:#6a737d}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#22863a}.hljs-subst{color:#24292e}.hljs-section{color:#005cc5;font-weight:700}.hljs-bullet{color:#735c0f}.hljs-emphasis{color:#24292e;font-style:italic}.hljs-strong{color:#24292e;font-weight:700}.hljs-addition{color:#22863a;background-color:#f0fff4}.hljs-deletion{color:#b31d28;background-color:#ffeef0}`;
-const HLJS_DARK_CSS = `pre code.hljs{display:block;overflow-x:auto;padding:1em}code.hljs{padding:3px 5px}.hljs{color:#c9d1d9;background:transparent}.hljs-doctag,.hljs-keyword,.hljs-meta .hljs-keyword,.hljs-template-tag,.hljs-template-variable,.hljs-type,.hljs-variable.language_{color:#ff7b72}.hljs-title,.hljs-title.class_,.hljs-title.class_.inherited__,.hljs-title.function_{color:#d2a8ff}.hljs-attr,.hljs-attribute,.hljs-literal,.hljs-meta,.hljs-number,.hljs-operator,.hljs-selector-attr,.hljs-selector-class,.hljs-selector-id,.hljs-variable{color:#79c0ff}.hljs-meta .hljs-string,.hljs-regexp,.hljs-string{color:#a5d6ff}.hljs-built_in,.hljs-symbol{color:#ffa657}.hljs-code,.hljs-comment,.hljs-formula{color:#8b949e}.hljs-name,.hljs-quote,.hljs-selector-pseudo,.hljs-selector-tag{color:#7ee787}.hljs-subst{color:#c9d1d9}.hljs-section{color:#1f6feb;font-weight:700}.hljs-bullet{color:#f2cc60}.hljs-emphasis{color:#c9d1d9;font-style:italic}.hljs-strong{color:#c9d1d9;font-weight:700}.hljs-addition{color:#aff5b4;background-color:#033a16}.hljs-deletion{color:#ffdcd7;background-color:#67060c}`;
-
-function getHljsCss() {
-  const isDark = currentTheme === 'dark' ||
-    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  return isDark ? HLJS_DARK_CSS : HLJS_LIGHT_CSS;
 }
 
 function truncateText(text) {
@@ -602,8 +593,9 @@ function openModal(item) {
   modalEditBar.style.display = 'none';
   modalHeaderId.style.display = '';
 
-  // Set header ID badge (short form: first 8 chars)
-  const shortId = String(item.id).length > 8 ? String(item.id).slice(0, 8) : String(item.id);
+  // Set header ID badge (random hex part after underscore)
+  const idStr = String(item.id);
+  const shortId = idStr.includes('_') ? idStr.split('_').pop() : idStr.slice(0, 8);
   modalHeaderId.textContent = `#${shortId}`;
 
   // Show/hide edit & language controls based on type
@@ -696,189 +688,12 @@ async function openFullscreen() {
 // 打开便签窗口：创建一个始终在顶部的小窗口显示内容
 async function openStickyNote() {
   if (!currentModalData) return;
-  const item = currentModalData;
-  const type = item.type || 'text';
-  const isDark = currentTheme === 'dark' ||
-    (currentTheme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const bgColor = isDark ? '#1a1b1e' : '#ffffff';
-  const textColor = isDark ? '#e4e5e7' : '#111827';
-  const btnHover = isDark ? '#2c2d33' : '#e2e8f0';
-  const btnBorder = isDark ? '#3a3b40' : '#e5e7eb';
-  const successColor = '#22c55e';
-  const mutedColor = isDark ? '#6b6c70' : '#9ca3af';
-  const fontMono = "'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace";
-
-  let bodyContent = '';
-  let copyDataScript = '';
-
-  // 图片类型：flexbox居中展示
-  if (type === 'image' && item.imageDataUrl) {
-    bodyContent = `<div style="display:flex;align-items:center;justify-content:center;flex:1;">
-      <img src="${item.imageDataUrl}" style="max-width:100%;max-height:100%;object-fit:contain;">
-    </div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const img = document.querySelector('img');
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0);
-          canvas.toBlob(async (blob) => {
-            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
-            showCopyOk();
-          }, 'image/png');
-        } catch { showCopyOk(); }
-      }`;
-  // 富文本类型：渲染HTML内容，紧凑布局
-  } else if (type === 'html' && item.htmlContent) {
-    // Escape for safe embedding in JavaScript string literals
-    const escapedHtml = item.htmlContent
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t')
-      .replace(/<\/script>/gi, '<\\/script>');
-    const escapedText = (item.content || '')
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t')
-      .replace(/<\/script>/gi, '<\\/script>');
-    // Sanitize HTML content for safe DOM embedding: neutralize script tags
-    const sanitizedStickyHtml = item.htmlContent
-      .replace(/<script[\s>]/gi, '&lt;script ')
-      .replace(/<\/script>/gi, '&lt;/script&gt;');
-    bodyContent = `<div class="content-html">${sanitizedStickyHtml}</div>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const htmlStr = '${escapedHtml}';
-          const textStr = '${escapedText}';
-          const htmlBlob = new Blob([htmlStr], {type: 'text/html'});
-          const textBlob = new Blob([textStr], {type: 'text/plain'});
-          await navigator.clipboard.write([new ClipboardItem({'text/html': htmlBlob, 'text/plain': textBlob})]);
-          showCopyOk();
-        } catch {
-          await navigator.clipboard.writeText('${escapedText}');
-          showCopyOk();
-        }
-      }`;
-  // 文本/代码类型：使用 pre+code 展示，支持语法高亮
-  } else {
-    const escaped = item.language ? highlightCode(item.content || '', item.language) : escapeHtml(item.content || '');
-    const codeClass = item.language ? ' class="hljs"' : '';
-    // Escape for safe embedding in JavaScript string literals
-    const escapedForJs = (item.content || '')
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t')
-      .replace(/<\/script>/gi, '<\\/script>');
-    bodyContent = `<pre class="content-text"><code${codeClass}>${escaped}</code></pre>`;
-    copyDataScript = `
-      async function doCopy() {
-        try {
-          const text = '${escapedForJs}';
-          await navigator.clipboard.writeText(text);
-          showCopyOk();
-        } catch {}
-      }`;
-  }
-
-  const copyBtnLabel = t('copy');
-  const pinLabel = t('pinToTop');
-  const hljsCssStickyInline = item.language ? getHljsCss() : '';
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>ClipStash - ${pinLabel}</title>
-<style>
-  :root {
-    --bg: ${bgColor};
-    --text: ${textColor};
-    --text-secondary: ${isDark ? '#a1a2a6' : '#4b5563'};
-    --text-muted: ${mutedColor};
-    --bg-hover: ${btnHover};
-    --border: ${btnBorder};
-    --success: ${successColor};
-    --font-mono: ${fontMono};
-    --transition: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; -webkit-app-region: drag; }
-  img { display: block; }
-
-  /* Content area */
-  .sticky-body { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 12px 16px; -webkit-app-region: no-drag; }
-  .sticky-body img { max-width: 100%; }
-
-  /* Shared toolbar (same rules as main.css .content-toolbar) */
-  .content-toolbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: flex-end; gap: 4px; pointer-events: none; height: 0; overflow: visible; }
-  .toolbar-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; transition: all var(--transition); pointer-events: auto; opacity: 0.45; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-  .toolbar-btn svg { width: 14px; height: 14px; }
-  body:hover .toolbar-btn { opacity: 0.85; }
-  .toolbar-btn:hover { opacity: 1 !important; background: var(--bg-hover); color: var(--text-secondary); border-color: var(--text-muted); }
-  .toolbar-btn.copied { opacity: 1 !important; background: var(--success); color: #fff; border-color: var(--success); }
-
-  /* Shared content formatting (same rules as main.css .content-text) */
-  .content-text { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: var(--text); margin: 0; padding: 0; background: transparent; tab-size: 4; }
-  .content-text code { font-family: inherit; font-size: inherit; line-height: inherit; display: block; white-space: pre-wrap; word-break: break-all; background: transparent !important; padding: 0 !important; tab-size: inherit; overflow-x: hidden; }
-  .content-text code.hljs { background: transparent !important; padding: 0 !important; overflow-x: hidden; }
-
-  /* Shared HTML content (same rules as main.css .content-html) */
-  .content-html { font-size: 12px; line-height: 1.6; color: var(--text); overflow: hidden; word-break: break-all; }
-  .content-html img { max-width: 100%; }
-
-  /* Scrollbar (same rules as main.css) */
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-  ${hljsCssStickyInline}
-
-  /* Override hljs defaults that appear after our rules */
-  .content-text code.hljs { overflow-x: hidden !important; padding: 0 !important; white-space: pre-wrap !important; word-break: break-all !important; }
-</style>
-</head>
-<body>
-<div class="sticky-body">
-  <div class="content-toolbar">
-    <button class="toolbar-btn" onclick="doCopy()" title="${copyBtnLabel}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-    </button>
-  </div>
-  ${bodyContent}
-</div>
-<script>
-  const ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-  const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>';
-  function showCopyOk() {
-    const btn = document.querySelector('.toolbar-btn');
-    btn.classList.add('copied');
-    btn.innerHTML = ICON_CHECK;
-    setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = ICON_COPY; }, 1500);
-  }
-  ${copyDataScript}
-</script>
-</body>
-</html>`;
-
   try {
-    await openStickyWindow(html);
+    await openStickyWindow(currentModalData.id);
     closeModal();
   } catch {
-    const blob = new Blob([html], { type: 'text/html' });
+    // Fallback: open as blob URL if Tauri API fails
+    const blob = new Blob([`<p>Failed to open sticky note</p>`], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
   }
@@ -1560,6 +1375,10 @@ async function setupTauriEvents() {
 // ===== Init =====
 
 async function init() {
+  // Initialize logging: forward console to Tauri log plugin
+  forwardConsole();
+  await attachConsole().catch(() => {});
+
   // Load settings
   currentSettings = await getSettings();
 
@@ -1585,6 +1404,8 @@ async function init() {
   if (currentSettings.clipboardMonitor) {
     await setClipboardMonitor(true).catch(() => {});
   }
+
+  info('Main window initialized');
 }
 
 init();

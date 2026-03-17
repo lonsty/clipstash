@@ -1,0 +1,108 @@
+/* ClipStash Extension Fullscreen Page Styles */
+
+/* 覆盖 popup.css 中 html 的固定样式 */
+html {
+  height: 100%;
+  overflow: hidden;
+}
+
+body.fullscreen-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  min-height: 100vh;
+  max-height: none;
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Header - fixed height to prevent layout shift between view/edit modes */
+.fs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg);
+  flex-shrink: 0;
+  gap: 12px;
+  height: 44px;
+}
+
+.fs-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.fs-header-left .modal-header-id {
+  flex-shrink: 0;
+}
+
+.fs-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Body */
+.fs-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  min-height: 0;
+  position: relative;
+}
+
+/* 编辑模式下补偿 padding */
+.fs-body.editing-mode {
+  padding: 10px 16px;
+}
+
+/* 全屏页面图片可展示更大 */
+.fs-body .modal-image {
+  max-height: none;
+  max-width: 100%;
+}
+
+/* Status bar */
+.fs-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 20px;
+  border-top: 1px solid var(--border-light);
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Tags section */
+.fs-tags-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 20px;
+  min-height: 32px;
+  border-top: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+
+/* Hide toolbar in edit mode */
+.fs-body.editing-mode .modal-content-toolbar,
+.fs-body.editing-mode .content-toolbar {
+  display: none;
+}
+
+/* 焦点移入内容区域时，按钮透明度提升，明确可感知 */
+.fs-body:hover .toolbar-btn {
+  opacity: .75;
+}

@@ -134,8 +134,8 @@ export async function openFullscreenWindow(itemId) {
   return await invoke('open_fullscreen_window', { itemId });
 }
 
-export async function openStickyWindow(htmlContent) {
-  return await invoke('open_sticky_window', { htmlContent });
+export async function openStickyWindow(itemId) {
+  return await invoke('open_sticky_window', { itemId });
 }
 
 // ===== App Info =====

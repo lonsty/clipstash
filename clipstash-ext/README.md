@@ -31,9 +31,10 @@
 |---------|-------------|
 | Clipboard caching | Cache clipboard content on click; supports text, images, HTML rich text |
 | Quick copy | One-click copy with "Copied ✓" feedback |
-| Fullscreen view | View long text and images in fullscreen modal |
+| Inline editing | Floating toolbar to edit text content directly; unsaved changes confirmation |
+| Fullscreen view | Open content in a new tab with full-width layout; supports editing, syntax highlighting |
 | Syntax highlighting | Code blocks highlighted with 30 language support |
-| Tags | Add custom tags to each item, search by tags |
+| Tags | Add custom tags to each item, duplicate detection with shake animation |
 | Search | Real-time search by content and tags, Ctrl/Cmd+F shortcut |
 | Pin | Pin frequently used items to the top |
 | Import / export | JSON format, auto-dedup on import |
@@ -121,11 +122,16 @@ clipstash-ext/
 ├── offscreen/
 │   ├── offscreen.html         # Offscreen document
 │   └── offscreen.js           # Clipboard reading
+├── fullscreen/
+│   ├── fullscreen.html        # Fullscreen page (new tab)
+│   ├── fullscreen.css         # Fullscreen styles
+│   └── fullscreen.js          # Fullscreen logic
 ├── utils/
 │   ├── storage.js             # Storage wrapper
 │   ├── clipboard.js           # Clipboard wrapper
 │   ├── time.js                # Relative time formatting
-│   └── i18n.js                # i18n (EN / 中文)
+│   ├── i18n.js                # i18n (EN / 中文)
+│   └── constants.js           # Shared constants
 ├── vendor/
 │   ├── highlight.min.js       # Syntax highlighting engine
 │   ├── hljs-light.css         # Light theme for highlight.js

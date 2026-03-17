@@ -72,21 +72,26 @@ async function readClipboard(tab) {
  * @param {chrome.tabs.Tab} [tab]
  */
 async function cacheClipboard(tab) {
-  const clipData = await readClipboard(tab);
+  try {
+    const clipData = await readClipboard(tab);
 
-  if (!clipData) {
-    await showBadge('—', '#9ca3af', 1000);
-    return;
-  }
+    if (!clipData) {
+      await showBadge('—', '#9ca3af', 1000);
+      return;
+    }
 
-  const result = await addCache(clipData);
+    const result = await addCache(clipData);
 
-  if (result.added) {
-    await showBadge('✓', '#22c55e');
-  } else if (result.duplicate) {
-    await showBadge('✓', '#f59e0b', 1000);
-  } else {
-    await showBadge('—', '#9ca3af', 1000);
+    if (result.added) {
+      await showBadge('✓', '#22c55e');
+    } else if (result.duplicate) {
+      await showBadge('✓', '#f59e0b', 1000);
+    } else {
+      await showBadge('—', '#9ca3af', 1000);
+    }
+  } catch (error) {
+    console.error('Failed to cache clipboard:', error);
+    await showBadge('✗', '#ef4444', 1500);
   }
 }
 

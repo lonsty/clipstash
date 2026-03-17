@@ -160,6 +160,7 @@ clipstash-desktop/
 ├── src/                           # Frontend (Vanilla JS)
 │   ├── index.html                 # Main page
 │   ├── fullscreen.html            # Fullscreen view page
+│   ├── sticky.html                # Sticky note page
 │   ├── icons/
 │   │   └── icon128.png            # App icon (header)
 │   ├── styles/
@@ -167,10 +168,12 @@ clipstash-desktop/
 │   │   └── fullscreen.css         # Fullscreen view styles
 │   ├── scripts/
 │   │   ├── main.js                # Main logic
-│   │   └── fullscreen.js          # Fullscreen view logic
+│   │   ├── fullscreen.js          # Fullscreen view logic
+│   │   └── sticky.js              # Sticky note logic
 │   └── utils/
 │       ├── bridge.js              # Tauri invoke wrapper
 │       ├── i18n.js                # i18n (EN / 中文, 80+ keys)
+│       ├── logger.js              # Frontend log forwarding (tauri-plugin-log)
 │       ├── storage.js             # Storage abstraction
 │       └── time.js                # Relative time formatting
 ├── package.json

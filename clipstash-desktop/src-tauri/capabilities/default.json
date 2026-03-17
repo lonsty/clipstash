@@ -25,6 +25,7 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "shell:allow-open",
-    "core:app:default"
+    "core:app:default",
+    "log:default"
   ]
 }

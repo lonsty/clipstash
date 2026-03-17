@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipStash",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Clipboard cache — stash clipboard content with one click, revisit anytime",
   "permissions": [
     "activeTab",
@@ -37,5 +37,24 @@
       "description": "Cache clipboard content"
     }
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fullscreen/fullscreen.html",
+        "fullscreen/fullscreen.css",
+        "fullscreen/fullscreen.js",
+        "popup/popup.css",
+        "vendor/highlight.min.js",
+        "vendor/hljs-light.css",
+        "vendor/hljs-dark.css",
+        "utils/storage.js",
+        "utils/constants.js",
+        "utils/time.js",
+        "utils/i18n.js",
+        "icons/icon128.png"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "minimum_chrome_version": "104"
 }

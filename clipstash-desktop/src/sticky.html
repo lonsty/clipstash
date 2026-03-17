@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ClipStash - Sticky Note</title>
+  <link rel="stylesheet" href="styles/main.css">
+  <link id="hljs-theme" rel="stylesheet" href="vendor/hljs-light.css">
+  <script src="vendor/highlight.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      -webkit-app-region: drag;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+    img { display: block; }
+
+    /* Content area */
+    .sticky-body {
+      flex: 1;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 12px 16px;
+      -webkit-app-region: no-drag;
+    }
+    .sticky-body img { max-width: 100%; }
+
+    /* Shared toolbar */
+    .content-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: flex-end;
+      gap: 4px;
+      pointer-events: none;
+      height: 0;
+      overflow: visible;
+    }
+    .toolbar-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      background: var(--bg-primary);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all .15s cubic-bezier(.4, 0, .2, 1);
+      pointer-events: auto;
+      opacity: .45;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .toolbar-btn svg { width: 14px; height: 14px; }
+    body:hover .toolbar-btn { opacity: .85; }
+    .toolbar-btn:hover {
+      opacity: 1;
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border-color: var(--text-muted);
+    }
+    .toolbar-btn.copied {
+      opacity: 1;
+      background: var(--success);
+      color: #fff;
+      border-color: var(--success);
+    }
+
+    /* Text / code content */
+    .content-text {
+      font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      tab-size: 4;
+    }
+    .content-text code {
+      font-family: inherit;
+      font-size: inherit;
+      line-height: inherit;
+      display: block;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: transparent;
+      padding: 0;
+      tab-size: inherit;
+      overflow-x: hidden;
+    }
+    .content-text code.hljs {
+      background: transparent;
+      padding: 0;
+      overflow-x: hidden;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* HTML content */
+    .content-html {
+      font-size: 12px;
+      line-height: 1.6;
+      overflow: hidden;
+      word-break: break-all;
+    }
+    .content-html img { max-width: 100%; }
+
+    /* Image content */
+    .content-image {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+    }
+    .content-image img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  </style>
+</head>
+<body>
+<div class="sticky-body">
+  <div class="content-toolbar">
+    <button id="btn-copy" class="toolbar-btn" title="Copy">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+    </button>
+  </div>
+  <div id="sticky-content"></div>
+</div>
+
+<script src="scripts/sticky.js" type="module"></script>
+</body>
+</html>

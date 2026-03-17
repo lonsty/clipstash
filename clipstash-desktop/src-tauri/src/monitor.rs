@@ -4,6 +4,7 @@ use tauri::{Emitter, Manager};
 
 /// start_monitor begins polling the clipboard for changes in a background thread.
 pub fn start_monitor(app: tauri::AppHandle) {
+    log::info!("Starting clipboard monitor");
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -15,6 +16,7 @@ pub fn start_monitor(app: tauri::AppHandle) {
                 *monitor
             };
             if !enabled {
+                log::info!("Stopping clipboard monitor");
                 break;
             }
 
@@ -46,6 +48,7 @@ pub fn start_monitor(app: tauri::AppHandle) {
                 *last_hash = current_hash;
             }
 
+            log::debug!("Clipboard change detected: type={}", clip_data.content_type);
             // Emit event to frontend to handle the caching
             app.emit("monitor-clipboard-changed", &clip_data).ok();
         }

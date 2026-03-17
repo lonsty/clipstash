@@ -8,6 +8,7 @@ mod tray;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 /// AppState holds shared application state.
 pub struct AppState {
@@ -22,6 +23,18 @@ pub struct AppState {
 
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::LogDir { file_name: None }),
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Webview),
+                ])
+                .max_file_size(10_000_000) // 10 MB per log file
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -41,6 +54,9 @@ pub fn run() {
             let db_path = app_data_dir.join("clipstash.db");
             let database =
                 db::Database::new(db_path.to_str().unwrap()).expect("failed to open database");
+
+            log::info!("ClipStash v{} starting", env!("CARGO_PKG_VERSION"));
+            log::info!("Data dir: path={}", app_data_dir.display());
 
             app.manage(AppState {
                 db: Mutex::new(database),
@@ -90,19 +106,13 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     // When a fullscreen or sticky window is closed, decrement suppress counter
                     if window.label().starts_with("fullscreen_") || window.label().starts_with("sticky_") {
+                        log::info!("Closing window: label={}", window.label());
                         if let Some(state) = window.app_handle().try_state::<AppState>() {
                             // Saturating decrement: never go below zero
                             state.suppress_auto_hide_count.fetch_update(
                                 Ordering::SeqCst, Ordering::SeqCst,
                                 |v| Some(v.saturating_sub(1))
                             ).ok();
-                        }
-                        // Clean up the temp HTML file (sticky windows still use temp files)
-                        if window.label().starts_with("sticky_") {
-                            if let Ok(temp_dir) = window.app_handle().path().app_data_dir() {
-                                let temp_file = temp_dir.join(format!("{}.html", window.label()));
-                                std::fs::remove_file(temp_file).ok();
-                            }
                         }
                     }
                 }

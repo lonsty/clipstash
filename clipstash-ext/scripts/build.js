@@ -11,6 +11,7 @@ const COPY_LIST = [
   'popup/',
   'background/',
   'offscreen/',
+  'fullscreen/',
   'utils/',
   'vendor/',
   'icons/'

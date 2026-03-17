@@ -65,7 +65,12 @@ export async function getTheme() {
  * @returns {Promise<void>}
  */
 export async function saveTheme(theme) {
-  await chrome.storage.local.set({ [THEME_KEY]: theme });
+  try {
+    await chrome.storage.local.set({ [THEME_KEY]: theme });
+  } catch (error) {
+    console.error('Failed to save theme:', error);
+    throw error;
+  }
 }
 
 // ===== Cache CRUD =====
@@ -102,72 +107,77 @@ function sortCaches(caches) {
  * @returns {Promise<{added: boolean, duplicate: boolean}>}
  */
 export async function addCache(data) {
-  const type = data.type || 'text';
-  const content = data.content || '';
-  const htmlContent = data.htmlContent || '';
-  const imageDataUrl = data.imageDataUrl || '';
-  const imageHash = data.imageHash || '';
+  try {
+    const type = data.type || 'text';
+    const content = data.content || '';
+    const htmlContent = data.htmlContent || '';
+    const imageDataUrl = data.imageDataUrl || '';
+    const imageHash = data.imageHash || '';
 
-  // Determine the dedup key based on type
-  let dedupKey = content;
-  if (type === 'image') {
-    dedupKey = imageHash || imageDataUrl;
-  }
-
-  if (!dedupKey || (typeof dedupKey === 'string' && !dedupKey.trim())) {
-    return { added: false, duplicate: false };
-  }
-
-  const caches = await getCaches();
-  const isDuplicate = caches.some(item => {
+    // Determine the dedup key based on type
+    let dedupKey = content;
     if (type === 'image') {
-      // Prefer hash-based dedup; fall back to data URL comparison for old records
-      if (imageHash && item.imageHash) return item.imageHash === imageHash;
-      if (imageHash || item.imageHash) return false;
-      return item.imageDataUrl === imageDataUrl;
+      dedupKey = imageHash || imageDataUrl;
     }
-    return item.content === content;
-  });
-  if (isDuplicate) {
-    return { added: false, duplicate: true };
-  }
 
-  const settings = await getSettings();
-
-  const newItem = {
-    id: generateId(),
-    type,
-    content,
-    createdAt: Date.now(),
-    contentLength: type === 'image' ? 0 : [...content].length,
-    tags: [],
-    pinned: false,
-    pinnedAt: 0
-  };
-
-  if (type === 'html') {
-    newItem.htmlContent = htmlContent;
-  }
-  if (type === 'image') {
-    newItem.imageDataUrl = imageDataUrl;
-    newItem.imageHash = imageHash;
-    newItem.contentLength = 0;
-  }
-
-  caches.unshift(newItem);
-
-  // Evict non-pinned oldest records
-  while (caches.length > settings.maxCacheSize) {
-    const lastUnpinnedIdx = caches.findLastIndex(c => !c.pinned);
-    if (lastUnpinnedIdx !== -1) {
-      caches.splice(lastUnpinnedIdx, 1);
-    } else {
-      break;
+    if (!dedupKey || (typeof dedupKey === 'string' && !dedupKey.trim())) {
+      return { added: false, duplicate: false };
     }
-  }
 
-  await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
-  return { added: true, duplicate: false };
+    const caches = await getCaches();
+    const isDuplicate = caches.some(item => {
+      if (type === 'image') {
+        // Prefer hash-based dedup; fall back to data URL comparison for old records
+        if (imageHash && item.imageHash) return item.imageHash === imageHash;
+        if (imageHash || item.imageHash) return false;
+        return item.imageDataUrl === imageDataUrl;
+      }
+      return item.content === content;
+    });
+    if (isDuplicate) {
+      return { added: false, duplicate: true };
+    }
+
+    const settings = await getSettings();
+
+    const newItem = {
+      id: generateId(),
+      type,
+      content,
+      createdAt: Date.now(),
+      contentLength: type === 'image' ? 0 : [...content].length,
+      tags: [],
+      pinned: false,
+      pinnedAt: 0
+    };
+
+    if (type === 'html') {
+      newItem.htmlContent = htmlContent;
+    }
+    if (type === 'image') {
+      newItem.imageDataUrl = imageDataUrl;
+      newItem.imageHash = imageHash;
+      newItem.contentLength = 0;
+    }
+
+    caches.unshift(newItem);
+
+    // Evict non-pinned oldest records
+    while (caches.length > settings.maxCacheSize) {
+      const lastUnpinnedIdx = caches.findLastIndex(c => !c.pinned);
+      if (lastUnpinnedIdx !== -1) {
+        caches.splice(lastUnpinnedIdx, 1);
+      } else {
+        break;
+      }
+    }
+
+    await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    return { added: true, duplicate: false };
+  } catch (error) {
+    console.error('Failed to add cache:', error);
+    throw error;
+  }
 }
 
 /**
@@ -176,12 +186,17 @@ export async function addCache(data) {
  * @returns {Promise<boolean>}
  */
 export async function removeCache(id) {
-  const caches = await getCaches();
-  const idx = caches.findIndex(item => item.id === id);
-  if (idx === -1) return false;
-  caches.splice(idx, 1);
-  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
-  return true;
+  try {
+    const caches = await getCaches();
+    const idx = caches.findIndex(item => item.id === id);
+    if (idx === -1) return false;
+    caches.splice(idx, 1);
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    return true;
+  } catch (error) {
+    console.error('Failed to remove cache:', error);
+    throw error;
+  }
 }
 
 /**
@@ -189,7 +204,12 @@ export async function removeCache(id) {
  * @returns {Promise<void>}
  */
 export async function clearAllCaches() {
-  await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+  try {
+    await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+  } catch (error) {
+    console.error('Failed to clear all caches:', error);
+    throw error;
+  }
 }
 
 /**
@@ -199,12 +219,17 @@ export async function clearAllCaches() {
  * @returns {Promise<boolean>}
  */
 export async function updateCacheTags(id, tags) {
-  const caches = await getCaches();
-  const item = caches.find(c => c.id === id);
-  if (!item) return false;
-  item.tags = tags;
-  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
-  return true;
+  try {
+    const caches = await getCaches();
+    const item = caches.find(c => c.id === id);
+    if (!item) return false;
+    item.tags = tags;
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    return true;
+  } catch (error) {
+    console.error('Failed to update tags:', error);
+    throw error;
+  }
 }
 
 /**
@@ -213,13 +238,18 @@ export async function updateCacheTags(id, tags) {
  * @returns {Promise<boolean>} the new pinned state
  */
 export async function togglePin(id) {
-  const caches = await getCaches();
-  const item = caches.find(c => c.id === id);
-  if (!item) return false;
-  item.pinned = !item.pinned;
-  item.pinnedAt = item.pinned ? Date.now() : 0;
-  await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
-  return item.pinned;
+  try {
+    const caches = await getCaches();
+    const item = caches.find(c => c.id === id);
+    if (!item) return false;
+    item.pinned = !item.pinned;
+    item.pinnedAt = item.pinned ? Date.now() : 0;
+    await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    return item.pinned;
+  } catch (error) {
+    console.error('Failed to toggle pin:', error);
+    throw error;
+  }
 }
 
 /**
@@ -229,13 +259,18 @@ export async function togglePin(id) {
  * @returns {Promise<boolean>}
  */
 export async function updateCacheContent(id, content) {
-  const caches = await getCaches();
-  const item = caches.find(c => c.id === id);
-  if (!item) return false;
-  item.content = content;
-  item.contentLength = [...content].length;
-  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
-  return true;
+  try {
+    const caches = await getCaches();
+    const item = caches.find(c => c.id === id);
+    if (!item) return false;
+    item.content = content;
+    item.contentLength = [...content].length;
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    return true;
+  } catch (error) {
+    console.error('Failed to update content:', error);
+    throw error;
+  }
 }
 
 /**
@@ -245,12 +280,17 @@ export async function updateCacheContent(id, content) {
  * @returns {Promise<boolean>}
  */
 export async function updateCacheLanguage(id, language) {
-  const caches = await getCaches();
-  const item = caches.find(c => c.id === id);
-  if (!item) return false;
-  item.language = language || null;
-  await chrome.storage.local.set({ [STORAGE_KEY]: caches });
-  return true;
+  try {
+    const caches = await getCaches();
+    const item = caches.find(c => c.id === id);
+    if (!item) return false;
+    item.language = language || null;
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    return true;
+  } catch (error) {
+    console.error('Failed to update language:', error);
+    throw error;
+  }
 }
 
 // ===== Search =====
@@ -376,14 +416,19 @@ function fromSnakeRecord(rec) {
  * @returns {Promise<string>}
  */
 export async function exportCaches() {
-  const caches = await getCaches();
-  const payload = {
-    version: 1,
-    exported_at: Date.now(),
-    app: 'ClipStash',
-    records: caches.map(toSnakeRecord)
-  };
-  return JSON.stringify(payload, null, 2);
+  try {
+    const caches = await getCaches();
+    const payload = {
+      version: 1,
+      exported_at: Date.now(),
+      app: 'ClipStash',
+      records: caches.map(toSnakeRecord)
+    };
+    return JSON.stringify(payload, null, 2);
+  } catch (error) {
+    console.error('Failed to export caches:', error);
+    throw error;
+  }
 }
 
 /**
@@ -392,58 +437,63 @@ export async function exportCaches() {
  * @returns {Promise<{total: number, added: number, duplicates: number}>}
  */
 export async function importCaches(jsonStr) {
-  const parsed = JSON.parse(jsonStr);
-  let records;
-  if (parsed && parsed.records && Array.isArray(parsed.records)) {
-    records = parsed.records;
-  } else if (Array.isArray(parsed)) {
-    records = parsed;
-  } else {
-    throw new Error('Invalid format');
-  }
-
-  const caches = await getCaches();
-  const settings = await getSettings();
-  let added = 0;
-  let duplicates = 0;
-
-  for (const raw of records) {
-    const rec = fromSnakeRecord(raw);
-
-    if (!rec.id || (!rec.content && !rec.imageDataUrl)) {
-      continue;
-    }
-
-    // Check duplicate
-    const isDup = caches.some(c => {
-      if (rec.type === 'image' && rec.imageDataUrl) {
-        if (rec.imageHash && c.imageHash) return c.imageHash === rec.imageHash;
-        if (rec.imageHash || c.imageHash) return false;
-        return c.imageDataUrl === rec.imageDataUrl;
-      }
-      return c.content === rec.content;
-    });
-
-    if (isDup) {
-      duplicates++;
-      continue;
-    }
-
-    caches.push(rec);
-    added++;
-  }
-
-  // Trim to max
-  const sorted = sortCaches(caches);
-  while (sorted.length > settings.maxCacheSize) {
-    const lastUnpinnedIdx = sorted.findLastIndex(c => !c.pinned);
-    if (lastUnpinnedIdx !== -1) {
-      sorted.splice(lastUnpinnedIdx, 1);
+  try {
+    const parsed = JSON.parse(jsonStr);
+    let records;
+    if (parsed && parsed.records && Array.isArray(parsed.records)) {
+      records = parsed.records;
+    } else if (Array.isArray(parsed)) {
+      records = parsed;
     } else {
-      break;
+      throw new Error('Invalid format');
     }
-  }
 
-  await chrome.storage.local.set({ [STORAGE_KEY]: sorted });
-  return { total: records.length, added, duplicates };
+    const caches = await getCaches();
+    const settings = await getSettings();
+    let added = 0;
+    let duplicates = 0;
+
+    for (const raw of records) {
+      const rec = fromSnakeRecord(raw);
+
+      if (!rec.id || (!rec.content && !rec.imageDataUrl)) {
+        continue;
+      }
+
+      // Check duplicate
+      const isDup = caches.some(c => {
+        if (rec.type === 'image' && rec.imageDataUrl) {
+          if (rec.imageHash && c.imageHash) return c.imageHash === rec.imageHash;
+          if (rec.imageHash || c.imageHash) return false;
+          return c.imageDataUrl === rec.imageDataUrl;
+        }
+        return c.content === rec.content;
+      });
+
+      if (isDup) {
+        duplicates++;
+        continue;
+      }
+
+      caches.push(rec);
+      added++;
+    }
+
+    // Trim to max
+    const sorted = sortCaches(caches);
+    while (sorted.length > settings.maxCacheSize) {
+      const lastUnpinnedIdx = sorted.findLastIndex(c => !c.pinned);
+      if (lastUnpinnedIdx !== -1) {
+        sorted.splice(lastUnpinnedIdx, 1);
+      } else {
+        break;
+      }
+    }
+
+    await chrome.storage.local.set({ [STORAGE_KEY]: sorted });
+    return { total: records.length, added, duplicates };
+  } catch (error) {
+    console.error('Failed to import caches:', error);
+    throw error;
+  }
 }

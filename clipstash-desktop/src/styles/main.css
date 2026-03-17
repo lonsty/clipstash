@@ -1095,9 +1095,9 @@ body {
   background: var(--bg);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all var(--transition);
+  transition: opacity .25s ease, background var(--transition), color var(--transition), border-color var(--transition);
   pointer-events: auto;
-  opacity: 0.45;
+  opacity: .25;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -1107,21 +1107,23 @@ body {
   height: 14px;
 }
 
-/* Parent-hover: reveal toolbar buttons when hovering content area */
+/* 焦点移入内容区域时，按钮透明度提升，明确可感知 */
 .modal-body:hover .toolbar-btn,
 .fs-body:hover .toolbar-btn {
-  opacity: 0.85;
+  opacity: .75;
 }
 
+/* 鼠标移到按钮本身时，完全不透明，方便点击 */
 .toolbar-btn:hover {
-  opacity: 1 !important;
+  opacity: 1;
   background: var(--bg-hover);
   color: var(--text-secondary);
   border-color: var(--text-muted);
 }
 
+/* 复制成功反馈 — 始终完全可见 */
 .toolbar-btn.copied {
-  opacity: 1 !important;
+  opacity: 1;
   background: var(--success);
   color: #fff;
   border-color: var(--success);

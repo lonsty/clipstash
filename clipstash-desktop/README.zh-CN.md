@@ -160,6 +160,7 @@ clipstash-desktop/
 ├── src/                           # 前端（Vanilla JS）
 │   ├── index.html                 # 主页面
 │   ├── fullscreen.html            # 全屏查看页面
+│   ├── sticky.html                # 便签页面
 │   ├── icons/
 │   │   └── icon128.png            # 应用图标
 │   ├── styles/
@@ -167,10 +168,12 @@ clipstash-desktop/
 │   │   └── fullscreen.css         # 全屏查看样式
 │   ├── scripts/
 │   │   ├── main.js                # 主逻辑
-│   │   └── fullscreen.js          # 全屏查看逻辑
+│   │   ├── fullscreen.js          # 全屏查看逻辑
+│   │   └── sticky.js              # 便签逻辑
 │   └── utils/
 │       ├── bridge.js              # Tauri 调用封装
 │       ├── i18n.js                # 国际化（EN / 中文，80+ 键值）
+│       ├── logger.js              # 前端日志转发（tauri-plugin-log）
 │       ├── storage.js             # 存储封装
 │       └── time.js                # 相对时间格式化
 ├── package.json
