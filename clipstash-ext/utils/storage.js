@@ -4,8 +4,42 @@ import {
   STORAGE_KEY,
   SETTINGS_KEY,
   THEME_KEY,
+  PENDING_DELETED_KEY,
+  PENDING_RESTORED_KEY,
   DEFAULT_MAX_CACHE_SIZE
 } from './constants.js';
+
+// ===== Storage Change Hooks =====
+// Pub-sub system: any module can subscribe to data mutations.
+// Sync subscribes once — no more scattered manual scheduleSyncPush() calls.
+
+const changeListeners = new Set();
+
+/**
+ * onStorageChange registers a listener that fires after any data mutation.
+ * @param {(action: string, detail?: Object) => void} listener
+ * @returns {() => void} unsubscribe function
+ */
+export function onStorageChange(listener) {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+/**
+ * notifyChange fires all registered change listeners.
+ * Called internally after every successful data mutation.
+ * @param {string} action - e.g. 'add', 'delete', 'update', 'restore', 'import', 'clear'
+ * @param {Object} [detail] - optional context (e.g. { id })
+ */
+function notifyChange(action, detail) {
+  for (const fn of changeListeners) {
+    try {
+      fn(action, detail);
+    } catch (err) {
+      console.error('[StorageHook] Listener error:', err);
+    }
+  }
+}
 
 /**
  * generateId generates a unique identifier
@@ -76,15 +110,46 @@ export async function saveTheme(theme) {
 // ===== Cache CRUD =====
 
 /**
- * getCaches retrieves all cache records from storage
+ * getCaches retrieves all active (non-deleted) cache records from storage
  * @returns {Promise<Array>}
  */
 export async function getCaches() {
   try {
     const data = await chrome.storage.local.get(STORAGE_KEY);
-    return data[STORAGE_KEY] || [];
+    const caches = data[STORAGE_KEY] || [];
+    // Filter out soft-deleted records
+    return caches.filter(item => !item.deletedAt);
   } catch (error) {
     console.error('Failed to get caches:', error);
+    return [];
+  }
+}
+
+/**
+ * getAllCachesIncludingDeleted retrieves all cache records including soft-deleted ones
+ * @returns {Promise<Array>}
+ */
+export async function getAllCachesIncludingDeleted() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    return data[STORAGE_KEY] || [];
+  } catch (error) {
+    console.error('Failed to get all caches:', error);
+    return [];
+  }
+}
+
+/**
+ * getDeletedCaches retrieves only soft-deleted cache records
+ * @returns {Promise<Array>}
+ */
+export async function getDeletedCaches() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    return caches.filter(item => !!item.deletedAt);
+  } catch (error) {
+    console.error('Failed to get deleted caches:', error);
     return [];
   }
 }
@@ -124,8 +189,12 @@ export async function addCache(data) {
       return { added: false, duplicate: false };
     }
 
-    const caches = await getCaches();
-    const isDuplicate = caches.some(item => {
+    // Read the full array (including soft-deleted) so we don't discard trash records
+    const rawData = await chrome.storage.local.get(STORAGE_KEY);
+    const allCaches = rawData[STORAGE_KEY] || [];
+    const activeCaches = allCaches.filter(c => !c.deletedAt);
+
+    const isDuplicate = activeCaches.some(item => {
       if (type === 'image') {
         // Prefer hash-based dedup; fall back to data URL comparison for old records
         if (imageHash && item.imageHash) return item.imageHash === imageHash;
@@ -160,19 +229,23 @@ export async function addCache(data) {
       newItem.contentLength = 0;
     }
 
-    caches.unshift(newItem);
+    activeCaches.unshift(newItem);
 
-    // Evict non-pinned oldest records
-    while (caches.length > settings.maxCacheSize) {
-      const lastUnpinnedIdx = caches.findLastIndex(c => !c.pinned);
+    // Evict non-pinned oldest active records only
+    while (activeCaches.length > settings.maxCacheSize) {
+      const lastUnpinnedIdx = activeCaches.findLastIndex(c => !c.pinned);
       if (lastUnpinnedIdx !== -1) {
-        caches.splice(lastUnpinnedIdx, 1);
+        activeCaches.splice(lastUnpinnedIdx, 1);
       } else {
         break;
       }
     }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    // Merge back: sorted active records + unchanged soft-deleted records
+    const deletedCaches = allCaches.filter(c => !!c.deletedAt);
+    const merged = [...sortCaches(activeCaches), ...deletedCaches];
+    await chrome.storage.local.set({ [STORAGE_KEY]: merged });
+    notifyChange('add', { id: newItem.id });
     return { added: true, duplicate: false };
   } catch (error) {
     console.error('Failed to add cache:', error);
@@ -181,33 +254,231 @@ export async function addCache(data) {
 }
 
 /**
- * removeCache removes a cache record by id
+ * removeCache soft-deletes a cache record by id (moves to trash).
+ * The record stays in storage with a deletedAt timestamp and will be
+ * permanently purged after the TTL expires (30 days).
  * @param {string} id
  * @returns {Promise<boolean>}
  */
 export async function removeCache(id) {
   try {
-    const caches = await getCaches();
-    const idx = caches.findIndex(item => item.id === id);
-    if (idx === -1) return false;
-    caches.splice(idx, 1);
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id && !c.deletedAt);
+    if (!item) return false;
+    item.deletedAt = Date.now();
+    // Track deletion for sync propagation
+    await appendPendingDeleted([id]);
     await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    notifyChange('delete', { id });
     return true;
   } catch (error) {
-    console.error('Failed to remove cache:', error);
+    console.error('Failed to soft-delete cache:', error);
     throw error;
   }
 }
 
 /**
- * clearAllCaches removes all cache records
+ * clearAllCaches soft-deletes all active cache records (moves to trash).
+ * Records stay in storage with deletedAt timestamps.
  * @returns {Promise<void>}
  */
 export async function clearAllCaches() {
   try {
-    await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const now = Date.now();
+    const activeIds = [];
+    for (const item of caches) {
+      if (!item.deletedAt) {
+        item.deletedAt = now;
+        activeIds.push(item.id);
+      }
+    }
+    if (activeIds.length > 0) {
+      await appendPendingDeleted(activeIds);
+    }
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    if (activeIds.length > 0) {
+      notifyChange('clear');
+    }
   } catch (error) {
-    console.error('Failed to clear all caches:', error);
+    console.error('Failed to soft-delete all caches:', error);
+    throw error;
+  }
+}
+
+/**
+ * deleteAllPermanently removes all cache records permanently (active + trash).
+ * @returns {Promise<number>} number of permanently deleted records
+ */
+export async function deleteAllPermanently() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    if (caches.length === 0) return 0;
+    const allIds = caches.map(c => c.id);
+    await appendPendingDeleted(allIds);
+    await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+    notifyChange('deleteAll', { count: allIds.length });
+    return allIds.length;
+  } catch (error) {
+    console.error('Failed to permanently delete all caches:', error);
+    throw error;
+  }
+}
+
+/**
+ * softDeleteCache marks a cache record as soft-deleted (trash bin)
+ * The record remains in storage but is hidden from normal views.
+ * It will be auto-purged after the TTL expires.
+ * @param {string} id
+ * @param {number} [deletedAt] - timestamp of deletion (defaults to now)
+ * @returns {Promise<boolean>}
+ */
+export async function softDeleteCache(id, deletedAt) {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id);
+    if (!item) return false;
+    item.deletedAt = deletedAt || Date.now();
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    return true;
+  } catch (error) {
+    console.error('Failed to soft-delete cache:', error);
+    throw error;
+  }
+}
+
+/**
+ * restoreCache restores a soft-deleted cache record
+ * @param {string} id
+ * @returns {Promise<boolean>}
+ */
+export async function restoreCache(id) {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id);
+    if (!item || !item.deletedAt) return false;
+    item.deletedAt = 0;
+    item.updatedAt = Date.now();
+    // Track restoration for sync: prevent cloud deleted_ids from re-deleting
+    await appendPendingRestored([id]);
+    // Remove from pending-deleted so we don't push deletion to cloud again
+    await removePendingDeleted([id]);
+    await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    notifyChange('restore', { id });
+    return true;
+  } catch (error) {
+    console.error('Failed to restore cache:', error);
+    throw error;
+  }
+}
+
+/**
+ * permanentDeleteCache permanently removes a soft-deleted cache record
+ * Unlike removeCache, this operates on all records including soft-deleted ones.
+ * @param {string} id
+ * @returns {Promise<boolean>}
+ */
+export async function permanentDeleteCache(id) {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const idx = caches.findIndex(c => c.id === id);
+    if (idx === -1) return false;
+    caches.splice(idx, 1);
+    // Track deletion for sync propagation
+    await appendPendingDeleted([id]);
+    await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    notifyChange('permanentDelete', { id });
+    return true;
+  } catch (error) {
+    console.error('Failed to permanently delete cache:', error);
+    throw error;
+  }
+}
+
+/**
+ * purgeExpiredCaches permanently removes soft-deleted records older than ttlMs
+ * @param {number} ttlMs - time-to-live in milliseconds (default 30 days)
+ * @returns {Promise<number>} number of purged records
+ */
+export async function purgeExpiredCaches(ttlMs = 30 * 24 * 60 * 60 * 1000) {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const now = Date.now();
+    const before = caches.length;
+    const remaining = caches.filter(item => {
+      if (!item.deletedAt) return true;
+      return (now - item.deletedAt) < ttlMs;
+    });
+    if (remaining.length < before) {
+      await chrome.storage.local.set({ [STORAGE_KEY]: remaining });
+    }
+    return before - remaining.length;
+  } catch (error) {
+    console.error('Failed to purge expired caches:', error);
+    return 0;
+  }
+}
+
+/**
+ * restoreAllCaches restores all soft-deleted cache records back to active
+ * @returns {Promise<number>} number of restored records
+ */
+export async function restoreAllCaches() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const restoredIds = [];
+    const now = Date.now();
+    for (const item of caches) {
+      if (item.deletedAt) {
+        item.deletedAt = 0;
+        item.updatedAt = now;
+        restoredIds.push(item.id);
+      }
+    }
+    if (restoredIds.length === 0) return 0;
+    await appendPendingRestored(restoredIds);
+    await removePendingDeleted(restoredIds);
+    await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    notifyChange('restoreAll', { count: restoredIds.length });
+    return restoredIds.length;
+  } catch (error) {
+    console.error('Failed to restore all caches:', error);
+    throw error;
+  }
+}
+
+/**
+ * permanentDeleteAllCaches permanently removes all soft-deleted cache records
+ * @returns {Promise<number>} number of permanently deleted records
+ */
+export async function permanentDeleteAllCaches() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const deletedIds = [];
+    const remaining = [];
+    for (const item of caches) {
+      if (item.deletedAt) {
+        deletedIds.push(item.id);
+      } else {
+        remaining.push(item);
+      }
+    }
+    if (deletedIds.length === 0) return 0;
+    await appendPendingDeleted(deletedIds);
+    await chrome.storage.local.set({ [STORAGE_KEY]: remaining });
+    notifyChange('permanentDeleteAll', { count: deletedIds.length });
+    return deletedIds.length;
+  } catch (error) {
+    console.error('Failed to permanently delete all caches:', error);
     throw error;
   }
 }
@@ -220,11 +491,14 @@ export async function clearAllCaches() {
  */
 export async function updateCacheTags(id, tags) {
   try {
-    const caches = await getCaches();
-    const item = caches.find(c => c.id === id);
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id && !c.deletedAt);
     if (!item) return false;
     item.tags = tags;
+    item.updatedAt = Date.now();
     await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    notifyChange('updateTags', { id });
     return true;
   } catch (error) {
     console.error('Failed to update tags:', error);
@@ -239,12 +513,16 @@ export async function updateCacheTags(id, tags) {
  */
 export async function togglePin(id) {
   try {
-    const caches = await getCaches();
-    const item = caches.find(c => c.id === id);
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id && !c.deletedAt);
     if (!item) return false;
+    const now = Date.now();
     item.pinned = !item.pinned;
-    item.pinnedAt = item.pinned ? Date.now() : 0;
+    item.pinnedAt = item.pinned ? now : 0;
+    item.updatedAt = now;
     await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+    notifyChange('togglePin', { id });
     return item.pinned;
   } catch (error) {
     console.error('Failed to toggle pin:', error);
@@ -260,12 +538,15 @@ export async function togglePin(id) {
  */
 export async function updateCacheContent(id, content) {
   try {
-    const caches = await getCaches();
-    const item = caches.find(c => c.id === id);
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id && !c.deletedAt);
     if (!item) return false;
     item.content = content;
     item.contentLength = [...content].length;
+    item.updatedAt = Date.now();
     await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    notifyChange('updateContent', { id });
     return true;
   } catch (error) {
     console.error('Failed to update content:', error);
@@ -281,11 +562,14 @@ export async function updateCacheContent(id, content) {
  */
 export async function updateCacheLanguage(id, language) {
   try {
-    const caches = await getCaches();
-    const item = caches.find(c => c.id === id);
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    const item = caches.find(c => c.id === id && !c.deletedAt);
     if (!item) return false;
     item.language = language || null;
+    item.updatedAt = Date.now();
     await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+    notifyChange('updateLanguage', { id });
     return true;
   } catch (error) {
     console.error('Failed to update language:', error);
@@ -302,7 +586,7 @@ export async function updateCacheLanguage(id, language) {
  */
 export async function searchCaches(query) {
   try {
-    const caches = await getCaches();
+    const caches = await getCaches(); // Already excludes soft-deleted
     if (!query || !query.trim()) return caches;
     const q = query.toLowerCase().trim();
     return caches.filter(item => {
@@ -338,7 +622,7 @@ export async function getAllTags() {
  * @returns {Promise<Object>}
  */
 export async function getStorageStats() {
-  const caches = await getCaches();
+  const caches = await getCaches(); // Active only
   const settings = await getSettings();
   const jsonStr = JSON.stringify(caches);
   const totalBytes = new Blob([jsonStr]).size;
@@ -375,6 +659,7 @@ function toSnakeRecord(rec) {
     type: rec.type,
     content: rec.content,
     created_at: rec.createdAt,
+    updated_at: rec.updatedAt,
     content_length: rec.contentLength,
     tags: rec.tags,
     pinned: rec.pinned,
@@ -394,11 +679,13 @@ function toSnakeRecord(rec) {
  */
 function fromSnakeRecord(rec) {
   const content = rec.content || '';
+  const createdAt = rec.created_at || Date.now();
   const out = {
     id: rec.id || generateId(),
     type: rec.type || 'text',
     content,
-    createdAt: rec.created_at || Date.now(),
+    createdAt,
+    updatedAt: rec.updated_at || createdAt,
     contentLength: rec.content_length || (content ? [...content].length : 0),
     tags: Array.isArray(rec.tags) ? rec.tags : [],
     pinned: !!rec.pinned,
@@ -409,6 +696,137 @@ function fromSnakeRecord(rec) {
   if (rec.image_hash) out.imageHash = rec.image_hash;
   if (rec.language) out.language = rec.language;
   return out;
+}
+
+// ===== Sync Helpers (used by sync.js) =====
+
+/**
+ * getCachesRaw returns the raw caches array including soft-deleted records (for sync)
+ * @returns {Promise<Array>}
+ */
+export { getAllCachesIncludingDeleted as getCachesRaw };
+
+/**
+ * setCachesRaw replaces all caches in storage (used during sync merge)
+ * @param {Array} caches
+ * @returns {Promise<void>}
+ */
+export async function setCachesRaw(caches) {
+  await chrome.storage.local.set({ [STORAGE_KEY]: sortCaches(caches) });
+}
+
+/**
+ * toSnakeRecordExport exports a record in snake_case format (used by sync)
+ */
+export { toSnakeRecord as toSnakeRecordExport };
+
+/**
+ * fromSnakeRecordImport imports a record from snake_case format (used by sync)
+ */
+export { fromSnakeRecord as fromSnakeRecordImport };
+
+// ===== Pending Deleted IDs (for sync propagation) =====
+
+/**
+ * appendPendingDeleted appends deleted record IDs to the pending list
+ * @param {string[]} ids - array of record IDs that were deleted locally
+ * @returns {Promise<void>}
+ */
+async function appendPendingDeleted(ids) {
+  try {
+    const data = await chrome.storage.local.get(PENDING_DELETED_KEY);
+    const existing = data[PENDING_DELETED_KEY] || [];
+    const now = Date.now();
+    const newEntries = ids.map(id => ({ id, deleted_at: now }));
+    await chrome.storage.local.set({
+      [PENDING_DELETED_KEY]: [...existing, ...newEntries],
+    });
+  } catch (error) {
+    console.error('Failed to append pending deleted:', error);
+  }
+}
+
+/**
+ * getPendingDeleted returns the list of locally-deleted record IDs pending sync
+ * @returns {Promise<Array<{id: string, deleted_at: number}>>}
+ */
+export async function getPendingDeleted() {
+  try {
+    const data = await chrome.storage.local.get(PENDING_DELETED_KEY);
+    return data[PENDING_DELETED_KEY] || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * clearPendingDeleted clears the pending deleted list after successful sync
+ * @returns {Promise<void>}
+ */
+export async function clearPendingDeleted() {
+  await chrome.storage.local.set({ [PENDING_DELETED_KEY]: [] });
+}
+
+/**
+ * removePendingDeleted removes specific IDs from the pending deleted list
+ * (used when a record is restored from trash)
+ * @param {string[]} ids - array of record IDs to remove
+ * @returns {Promise<void>}
+ */
+async function removePendingDeleted(ids) {
+  try {
+    const data = await chrome.storage.local.get(PENDING_DELETED_KEY);
+    const existing = data[PENDING_DELETED_KEY] || [];
+    const idSet = new Set(ids);
+    const filtered = existing.filter(e => !idSet.has(e.id));
+    await chrome.storage.local.set({ [PENDING_DELETED_KEY]: filtered });
+  } catch (error) {
+    console.error('Failed to remove pending deleted:', error);
+  }
+}
+
+// ===== Pending Restored IDs (for sync: prevent cloud deleted_ids from re-deleting) =====
+
+/**
+ * appendPendingRestored appends restored record IDs to the pending list
+ * @param {string[]} ids - array of record IDs that were restored locally
+ * @returns {Promise<void>}
+ */
+async function appendPendingRestored(ids) {
+  try {
+    const data = await chrome.storage.local.get(PENDING_RESTORED_KEY);
+    const existing = data[PENDING_RESTORED_KEY] || [];
+    const existingSet = new Set(existing);
+    for (const id of ids) {
+      existingSet.add(id);
+    }
+    await chrome.storage.local.set({
+      [PENDING_RESTORED_KEY]: [...existingSet],
+    });
+  } catch (error) {
+    console.error('Failed to append pending restored:', error);
+  }
+}
+
+/**
+ * getPendingRestored returns the list of locally-restored record IDs pending sync
+ * @returns {Promise<string[]>}
+ */
+export async function getPendingRestored() {
+  try {
+    const data = await chrome.storage.local.get(PENDING_RESTORED_KEY);
+    return data[PENDING_RESTORED_KEY] || [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * clearPendingRestored clears the pending restored list after successful sync
+ * @returns {Promise<void>}
+ */
+export async function clearPendingRestored() {
+  await chrome.storage.local.set({ [PENDING_RESTORED_KEY]: [] });
 }
 
 /**
@@ -448,7 +866,12 @@ export async function importCaches(jsonStr) {
       throw new Error('Invalid format');
     }
 
-    const caches = await getCaches();
+    // Read the full array (including soft-deleted) so we don't discard trash records
+    const rawData = await chrome.storage.local.get(STORAGE_KEY);
+    const allCaches = rawData[STORAGE_KEY] || [];
+    const activeCaches = allCaches.filter(c => !c.deletedAt);
+    const deletedCaches = allCaches.filter(c => !!c.deletedAt);
+
     const settings = await getSettings();
     let added = 0;
     let duplicates = 0;
@@ -460,8 +883,8 @@ export async function importCaches(jsonStr) {
         continue;
       }
 
-      // Check duplicate
-      const isDup = caches.some(c => {
+      // Check duplicate against active records only
+      const isDup = activeCaches.some(c => {
         if (rec.type === 'image' && rec.imageDataUrl) {
           if (rec.imageHash && c.imageHash) return c.imageHash === rec.imageHash;
           if (rec.imageHash || c.imageHash) return false;
@@ -475,12 +898,12 @@ export async function importCaches(jsonStr) {
         continue;
       }
 
-      caches.push(rec);
+      activeCaches.push(rec);
       added++;
     }
 
-    // Trim to max
-    const sorted = sortCaches(caches);
+    // Trim to max (active records only)
+    const sorted = sortCaches(activeCaches);
     while (sorted.length > settings.maxCacheSize) {
       const lastUnpinnedIdx = sorted.findLastIndex(c => !c.pinned);
       if (lastUnpinnedIdx !== -1) {
@@ -490,7 +913,12 @@ export async function importCaches(jsonStr) {
       }
     }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: sorted });
+    // Merge back: sorted active records + unchanged soft-deleted records
+    const merged = [...sorted, ...deletedCaches];
+    await chrome.storage.local.set({ [STORAGE_KEY]: merged });
+    if (added > 0) {
+      notifyChange('import', { added });
+    }
     return { total: records.length, added, duplicates };
   } catch (error) {
     console.error('Failed to import caches:', error);

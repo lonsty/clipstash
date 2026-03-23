@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-23
+
+### Added
+
+- **Cloud Sync** — sync clipboard data across devices via GitHub Gist; connect with a fine-grained PAT (Gists read/write scope); supports auto-sync with periodic push/pull
+- **Trash bin** — soft delete with 30-day retention; records can be restored or permanently deleted
+- **Trash batch actions** — "Restore All" and "Empty Trash" buttons
+- **Delete All Permanently** — danger zone action in settings to permanently wipe all data (active + trash)
+- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js` for code reuse between Extension and Desktop
+- **Modular architecture** — `main.js` refactored into modules: `card-renderer.js`, `modal-controller.js`, `trash-panel.js`, `sync-ui.js`, `settings-panel.js`
+- **Sync Tauri commands** — new Rust backend commands for GitHub Gist sync operations (`sync_push`, `sync_pull`, `sync_get_config`, `sync_set_config`, etc.)
+
+### Changed
+
+- **i18n architecture** — shared `BASE_MESSAGES` + platform-specific messages; `mergeMessages()` function for composability
+- **Time formatting** — delegated to shared `dom-utils.js` with dependency-injected `t()` function
+- **Code organization** — `main.js` reduced from ~1200 lines to ~300 lines via module extraction; `fullscreen.js` and `sticky.js` now use shared `fullscreen-controller.js`
+- **Database schema** — added `deleted_at` column, `sync_meta` table, and trash-related queries for soft-delete support
+- **Storage layer** — added trash operations (`soft_delete`, `restore`, `empty_trash`, `get_trash_items`) and sync-related data conversion functions
+- **Rust dependencies** — added `reqwest` (with JSON feature) for GitHub API communication
+
+### Fixed
+
+- **Sync data format** — `updated_at` field correctly included in snake_case record conversion
+
 ## [0.1.3] - 2026-03-20
 
 ### Added
@@ -114,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cross-platform** — macOS (.app / .dmg), Windows (.exe), Linux (.deb / .AppImage)
 - **Privacy** — zero network requests, all data stored locally
 
+[0.2.0]: https://github.com/lonsty/clipstash/releases/tag/v0.2.0
 [0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1

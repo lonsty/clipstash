@@ -1,197 +1,44 @@
 // ClipStash Desktop - Internationalization module
+// Messages are sourced from shared/messages.js + Desktop-specific overrides.
 
-const MESSAGES = {
-  en: {
-    appName: 'ClipStash',
-    clearAll: 'Clear All',
-    searchPlaceholder: 'Search content or tags…',
-    emptyTitle: 'No cached records',
-    emptyDesc: 'Copy something, then click "Cache clipboard" to save',
-    noResultsTitle: 'No matching content',
-    noResultsDesc: 'Try different search keywords',
-    tags: 'Tags',
-    addTag: '+ Add',
-    addTagHint: 'Add tag',
-    tagInputPlaceholder: 'Tag name, press Enter',
-    copy: 'Copy',
-    copied: 'Copied ✓',
-    pin: 'Pin',
-    unpin: 'Unpin',
-    delete: 'Delete',
-    chars: 'chars',
-    justNow: 'just now',
-    secondsAgo: '{n}s ago',
-    minutesAgo: '{n}m ago',
-    hoursAgo: '{n}h ago',
-    yesterday: 'yesterday',
-    daysAgo: '{n}d ago',
-    items: 'items',
-    found: 'found {n}',
-    confirmDeleteTitle: 'Delete this cache?',
-    confirmDeleteDesc: 'This action cannot be undone.',
-    confirmDeleteOk: 'Delete',
-    confirmClearTitle: 'Clear all cached records?',
-    confirmClearDesc: 'This action cannot be undone.',
-    confirmClearOk: 'Clear All',
-    cancel: 'Cancel',
-    save: 'Save',
-    settings: 'Settings',
-    settingMaxCache: 'Cache Limit',
-    settingMaxCacheDesc: 'Max records to keep (10 – 999)',
-    settingUnit: 'items',
-    settingTheme: 'Theme',
-    settingThemeDesc: 'Choose color scheme',
-    themeSystem: 'System',
-    themeLight: 'Light',
-    themeDark: 'Dark',
-    settingLang: 'Language',
-    settingLangDesc: 'Interface language',
-    settingShortcut: 'Global Shortcut',
-    settingShortcutDesc: 'Cache clipboard shortcut key',
-    settingShortcutChange: 'Change',
-    settingShortcutRecord: 'Press keys…',
-    settingGeneral: 'General',
-    settingGeneralDesc: 'Desktop application settings',
-    settingAutostart: 'Launch at startup',
-    settingClipboardMonitor: 'Auto-monitor clipboard',
-    settingNotification: 'Show notifications',
-    settingData: 'Data',
-    settingDataDesc: 'Export or import cache records',
-    settingDangerZone: 'Danger Zone',
-    settingDangerZoneDesc: 'Irreversible operations',
-    exportData: 'Export',
-    importData: 'Import',
-    importSuccess: 'Imported {n} records',
-    importFail: 'Import failed: invalid file',
-    importDuplicate: '{n} new, {d} duplicates skipped',
-    typeImage: 'Image',
-    typeHtml: 'Rich Text',
-    imageAlt: 'Cached image',
-    fullscreen: 'Fullscreen',
-    pinToTop: 'Sticky Note',
-    edit: 'Edit',
-    editing: 'Editing',
-    cancelEdit: 'Cancel',
-    saveEdit: 'Save',
-    syntaxLang: 'Syntax Language',
-    traySettings: 'Settings',
-    trayQuit: 'Quit',
-    cacheNow: 'Cache clipboard',
-    cacheSuccess: 'Cached',
-    cacheDuplicate: 'Already cached',
-    cacheEmpty: 'Clipboard empty',
-    notifCached: 'Clipboard content cached',
-    notifDuplicate: 'Content already cached',
-    notifEmpty: 'Clipboard is empty',
-    tagExists: 'Tag already exists',
-    unsavedTitle: 'Discard unsaved changes?',
-    unsavedDesc: 'You have unsaved edits that will be lost.',
-    discardChanges: 'Discard',
-  },
-  zh: {
-    appName: 'ClipStash',
-    clearAll: '清空全部',
-    searchPlaceholder: '搜索内容或标签…',
-    emptyTitle: '暂无缓存记录',
-    emptyDesc: '复制内容后，点击「缓存剪切板」按钮即可保存',
-    noResultsTitle: '未找到匹配内容',
-    noResultsDesc: '尝试更换搜索关键词',
-    tags: '标签',
-    addTag: '+ 添加',
-    addTagHint: '添加标签',
-    tagInputPlaceholder: '输入标签名，回车确认',
-    copy: '复制',
-    copied: '已复制 ✓',
-    pin: '置顶',
-    unpin: '取消置顶',
-    delete: '删除',
-    chars: '字符',
-    justNow: '刚刚',
-    secondsAgo: '{n} 秒前',
-    minutesAgo: '{n} 分钟前',
-    hoursAgo: '{n} 小时前',
-    yesterday: '昨天',
-    daysAgo: '{n} 天前',
-    items: '条',
-    found: '找到 {n} 条',
-    confirmDeleteTitle: '确定要删除这条缓存吗？',
-    confirmDeleteDesc: '删除后不可恢复。',
-    confirmDeleteOk: '确定删除',
-    confirmClearTitle: '确定要清空所有缓存记录吗？',
-    confirmClearDesc: '此操作不可撤销。',
-    confirmClearOk: '确定清空',
-    cancel: '取消',
-    save: '保存',
-    settings: '设置',
-    settingMaxCache: '缓存上限',
-    settingMaxCacheDesc: '最多保存的缓存条数（10 ~ 999）',
-    settingUnit: '条',
-    settingTheme: '主题',
-    settingThemeDesc: '选择配色方案',
-    themeSystem: '跟随系统',
-    themeLight: '浅色',
-    themeDark: '深色',
-    settingLang: '语言',
-    settingLangDesc: '界面语言',
-    settingShortcut: '全局快捷键',
-    settingShortcutDesc: '缓存剪切板的快捷键',
-    settingShortcutChange: '修改',
-    settingShortcutRecord: '请按下快捷键…',
-    settingGeneral: '常规',
-    settingGeneralDesc: '桌面应用设置',
-    settingAutostart: '开机自启动',
-    settingClipboardMonitor: '自动监听剪切板',
-    settingNotification: '显示系统通知',
-    settingData: '数据',
-    settingDataDesc: '导出或导入缓存记录',
-    settingDangerZone: '危险操作',
-    settingDangerZoneDesc: '以下操作不可撤销',
-    exportData: '导出',
-    importData: '导入',
-    importSuccess: '已导入 {n} 条记录',
-    importFail: '导入失败：文件格式无效',
-    importDuplicate: '新增 {n} 条，跳过 {d} 条重复',
-    typeImage: '图片',
-    typeHtml: '富文本',
-    imageAlt: '缓存图片',
-    fullscreen: '全屏展示',
-    pinToTop: '便签',
-    edit: '编辑',
-    editing: '编辑中',
-    cancelEdit: '取消',
-    saveEdit: '保存',
-    syntaxLang: '语法高亮语言',
-    traySettings: '设置',
-    trayQuit: '退出',
-    cacheNow: '缓存剪切板',
-    cacheSuccess: '已缓存',
-    cacheDuplicate: '已存在',
-    cacheEmpty: '剪切板为空',
-    notifCached: '剪切板内容已缓存',
-    notifDuplicate: '该内容已缓存过',
-    notifEmpty: '剪切板为空',
-    tagExists: '该标签已存在',
-    unsavedTitle: '放弃未保存的修改？',
-    unsavedDesc: '你有未保存的编辑内容，将会丢失。',
-    discardChanges: '放弃修改',
-  }
-};
+import { mergeMessages, DESKTOP_MESSAGES } from '../shared/messages.js';
+
+const MESSAGES = mergeMessages(DESKTOP_MESSAGES);
 
 let currentLang = 'en';
 
+/**
+ * initLang initializes the language (Desktop uses settings, not chrome.storage)
+ * @param {string} lang - language code
+ * @returns {string} the resolved locale
+ */
 export function initLang(lang) {
   currentLang = lang || 'en';
   return currentLang;
 }
 
+/**
+ * setLang sets the current language in-memory
+ * @param {string} lang - 'en' or 'zh'
+ */
 export function setLang(lang) {
   currentLang = lang;
 }
 
+/**
+ * getLang returns the current language code
+ * @returns {string}
+ */
 export function getLang() {
   return currentLang;
 }
 
+/**
+ * t returns a translated string with optional interpolation
+ * @param {string} key - message key
+ * @param {Object} [params] - interpolation values, e.g. {n: 5}
+ * @returns {string}
+ */
 export function t(key, params) {
   const dict = MESSAGES[currentLang] || MESSAGES.en;
   let text = dict[key] || MESSAGES.en[key] || key;

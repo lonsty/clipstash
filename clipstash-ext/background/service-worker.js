@@ -1,7 +1,11 @@
-// ClipStash - Service Worker (icon click, shortcut, context menu)
+// ClipStash - Service Worker (icon click, shortcut, context menu, periodic sync)
 
 import { addCache } from '../utils/storage.js';
 import { readClipboardViaScript, readClipboardViaOffscreen } from '../utils/clipboard.js';
+import { getSyncSettings, performSync } from '../utils/sync.js';
+import { SYNC_PERIODIC_PULL_INTERVAL } from '../utils/constants.js';
+
+const SYNC_ALARM_NAME = 'clipstash-periodic-sync';
 
 // ===== Badge =====
 
@@ -25,11 +29,17 @@ async function showBadge(text, color, duration = 1500) {
  * openPopup opens the popup page via temporary popup assignment
  */
 async function openPopup() {
-  await chrome.action.setPopup({ popup: 'popup/popup.html' });
-  await chrome.action.openPopup();
-  setTimeout(async () => {
-    await chrome.action.setPopup({ popup: '' });
-  }, 500);
+  try {
+    await chrome.action.setPopup({ popup: 'popup/popup.html' });
+    await chrome.action.openPopup();
+    setTimeout(async () => {
+      await chrome.action.setPopup({ popup: '' });
+    }, 500);
+  } catch {
+    // chrome.action.openPopup() may fail in certain contexts;
+    // keep popup assigned so next icon click opens it normally
+    console.warn('[ClipStash] openPopup failed, popup will open on next click');
+  }
 }
 
 /**
@@ -37,12 +47,16 @@ async function openPopup() {
  * @param {string} action
  */
 async function openPopupWithAction(action) {
-  await chrome.action.setPopup({ popup: 'popup/popup.html' });
-  await chrome.action.openPopup();
-  setTimeout(async () => {
-    await chrome.action.setPopup({ popup: '' });
-    chrome.runtime.sendMessage({ action });
-  }, 300);
+  try {
+    await chrome.action.setPopup({ popup: 'popup/popup.html' });
+    await chrome.action.openPopup();
+    setTimeout(async () => {
+      await chrome.action.setPopup({ popup: '' });
+      chrome.runtime.sendMessage({ action });
+    }, 300);
+  } catch {
+    console.warn('[ClipStash] openPopupWithAction failed');
+  }
 }
 
 // ===== Clipboard Cache =====
@@ -103,7 +117,57 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Settings',
     contexts: ['action']
   });
+  // Set up periodic sync alarm
+  setupSyncAlarm();
 });
+
+// ===== Periodic Sync via chrome.alarms =====
+
+async function setupSyncAlarm() {
+  try {
+    const settings = await getSyncSettings();
+    if (settings.enabled && settings.token && settings.gistId) {
+      await chrome.alarms.create(SYNC_ALARM_NAME, {
+        periodInMinutes: SYNC_PERIODIC_PULL_INTERVAL,
+      });
+      console.log(`[ClipStash] Periodic sync alarm set (every ${SYNC_PERIODIC_PULL_INTERVAL}min)`);
+    } else {
+      await chrome.alarms.clear(SYNC_ALARM_NAME);
+    }
+  } catch (err) {
+    console.warn('[ClipStash] Failed to set sync alarm:', err);
+  }
+}
+
+async function handlePeriodicSync() {
+  try {
+    const settings = await getSyncSettings();
+    if (!settings.enabled || !settings.token || !settings.gistId) {
+      await chrome.alarms.clear(SYNC_ALARM_NAME);
+      return;
+    }
+    await performSync();
+    console.log('[ClipStash] Periodic sync completed');
+  } catch (err) {
+    const msg = typeof err === 'string' ? err : (err.message || String(err));
+    console.warn('[ClipStash] Periodic sync failed:', msg);
+
+    // 401 / 403 → token is invalid; clear alarm to stop retries
+    if (/HTTP\s*(401|403)|Unauthorized|Forbidden/i.test(msg)) {
+      console.warn('[ClipStash] Auth failure — clearing periodic sync alarm');
+      await chrome.alarms.clear(SYNC_ALARM_NAME);
+    }
+  }
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === SYNC_ALARM_NAME) {
+    handlePeriodicSync();
+  }
+});
+
+// Re-check alarm on service worker startup
+setupSyncAlarm();
 
 chrome.contextMenus.onClicked.addListener(async (info) => {
   if (info.menuItemId === 'open-settings') {

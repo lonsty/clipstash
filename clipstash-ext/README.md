@@ -31,6 +31,8 @@
 |---------|-------------|
 | Clipboard caching | Cache clipboard content on click; supports text, images, HTML rich text |
 | Quick copy | One-click copy with "Copied ✓" feedback |
+| Cloud Sync | Sync clipboard data across devices via GitHub Gist with auto-sync |
+| Trash bin | Soft delete with 30-day retention; restore or permanently delete |
 | Inline editing | Floating toolbar to edit text content directly; unsaved changes confirmation |
 | Fullscreen view | Open content in a new tab with full-width layout; supports editing, syntax highlighting |
 | Syntax highlighting | Code blocks highlighted with 30 language support |
@@ -116,7 +118,13 @@ clipstash-ext/
 ├── popup/
 │   ├── popup.html             # Popup page
 │   ├── popup.css              # Styles
-│   └── popup.js               # UI logic
+│   ├── popup.js               # UI logic (module orchestrator)
+│   └── modules/
+│       ├── card-renderer.js   # Card list rendering
+│       ├── modal-controller.js # Detail modal logic
+│       ├── settings-panel.js  # Settings panel
+│       ├── sync-ui.js         # Sync UI & GitHub Gist config
+│       └── trash-panel.js     # Trash bin panel
 ├── background/
 │   └── service-worker.js      # Service Worker
 ├── offscreen/
@@ -126,12 +134,19 @@ clipstash-ext/
 │   ├── fullscreen.html        # Fullscreen page (new tab)
 │   ├── fullscreen.css         # Fullscreen styles
 │   └── fullscreen.js          # Fullscreen logic
+├── shared/                    # Shared modules (symlinked from root shared/)
+│   ├── constants.js           # Shared constants
+│   ├── dom-utils.js           # DOM utility functions
+│   ├── fullscreen-controller.js # Fullscreen page controller
+│   ├── icons.js               # SVG icon definitions
+│   └── messages.js            # Base i18n messages
 ├── utils/
 │   ├── storage.js             # Storage wrapper
 │   ├── clipboard.js           # Clipboard wrapper
 │   ├── time.js                # Relative time formatting
 │   ├── i18n.js                # i18n (EN / 中文)
-│   └── constants.js           # Shared constants
+│   ├── constants.js           # Extension-specific constants
+│   └── sync.js                # GitHub Gist sync client
 ├── vendor/
 │   ├── highlight.min.js       # Syntax highlighting engine
 │   ├── hljs-light.css         # Light theme for highlight.js
@@ -146,8 +161,8 @@ clipstash-ext/
 ## Privacy
 
 - No user data collection
-- No network requests
 - All data stored locally (`chrome.storage.local`)
+- Optional Cloud Sync via GitHub Gist (user-controlled; only connects to `api.github.com` when enabled)
 
 ## Related
 

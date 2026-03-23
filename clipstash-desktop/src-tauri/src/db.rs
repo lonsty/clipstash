@@ -24,6 +24,13 @@ pub struct CacheItem {
     pub pinned_at: Option<i64>,
     /// language holds the user-selected syntax highlighting language (e.g. "json", "python").
     pub language: Option<String>,
+    /// updated_at tracks the last modification timestamp for sync conflict resolution.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// deleted_at is non-zero when the record is soft-deleted (trash bin).
+    /// 0 means the record is active.
+    #[serde(rename = "deletedAt", default)]
+    pub deleted_at: i64,
 }
 
 /// Settings represents user application settings.
@@ -78,7 +85,7 @@ pub struct ImportResult {
 
 /// Database wraps a SQLite connection and provides all data operations.
 pub struct Database {
-    conn: Connection,
+    pub(crate) conn: Connection,
     db_path: String,
 }
 
@@ -100,7 +107,8 @@ impl Database {
                 content_length INTEGER NOT NULL,
                 pinned INTEGER NOT NULL DEFAULT 0,
                 pinned_at INTEGER,
-                language TEXT
+                language TEXT,
+                updated_at INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS cache_tags (
@@ -117,7 +125,19 @@ impl Database {
 
             CREATE INDEX IF NOT EXISTS idx_caches_created_at ON caches(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_caches_pinned ON caches(pinned, pinned_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_cache_tags_tag ON cache_tags(tag);",
+            CREATE INDEX IF NOT EXISTS idx_cache_tags_tag ON cache_tags(tag);
+
+            CREATE TABLE IF NOT EXISTS pending_deleted (
+                id TEXT NOT NULL,
+                deleted_at INTEGER NOT NULL,
+                PRIMARY KEY (id)
+            );
+
+            CREATE TABLE IF NOT EXISTS pending_restored (
+                id TEXT NOT NULL,
+                restored_at INTEGER NOT NULL,
+                PRIMARY KEY (id)
+            );",
         )?;
 
         // Migration: add language column if missing (for existing databases)
@@ -130,6 +150,28 @@ impl Database {
             conn.execute_batch("ALTER TABLE caches ADD COLUMN language TEXT")?;
         }
 
+        // Migration: add updated_at column if missing (for existing databases)
+        let has_updated_at: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('caches') WHERE name='updated_at'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_updated_at {
+            conn.execute_batch("ALTER TABLE caches ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0")?;
+            // Backfill: set updated_at = created_at for existing records
+            conn.execute_batch("UPDATE caches SET updated_at = created_at WHERE updated_at = 0")?;
+        }
+
+        // Migration: add deleted_at column if missing (soft-delete / trash bin)
+        let has_deleted_at: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('caches') WHERE name='deleted_at'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_deleted_at {
+            conn.execute_batch("ALTER TABLE caches ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0")?;
+        }
+
         Ok(Self {
             conn,
             db_path: path.to_string(),
@@ -140,7 +182,7 @@ impl Database {
     pub fn get_cache_by_id(&self, id: &str) -> SqlResult<Option<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
              FROM caches WHERE id = ?1",
         )?;
 
@@ -158,6 +200,8 @@ impl Database {
                 pinned: row.get::<_, i32>(8)? != 0,
                 pinned_at: row.get(9)?,
                 language: row.get(10)?,
+                updated_at: row.get(11)?,
+                deleted_at: row.get::<_, i64>(12).unwrap_or(0),
             })
         })?;
 
@@ -171,11 +215,13 @@ impl Database {
     }
 
     /// get_caches returns cached records with pagination, pinned first.
+    /// Only returns active (non-soft-deleted) records.
     pub fn get_caches(&self, offset: i64, limit: i64) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
              FROM caches
+             WHERE deleted_at = 0
              ORDER BY pinned DESC, CASE WHEN pinned = 1 THEN pinned_at ELSE created_at END DESC
              LIMIT ?1 OFFSET ?2",
         )?;
@@ -194,6 +240,8 @@ impl Database {
                 pinned: row.get::<_, i32>(8)? != 0,
                 pinned_at: row.get(9)?,
                 language: row.get(10)?,
+                updated_at: row.get(11)?,
+                deleted_at: row.get::<_, i64>(12).unwrap_or(0),
             })
         })?;
 
@@ -207,12 +255,50 @@ impl Database {
         Ok(items)
     }
 
-    /// get_all_caches returns all cached records.
+    /// get_all_caches returns all active (non-soft-deleted) cached records.
     pub fn get_all_caches(&self) -> SqlResult<Vec<CacheItem>> {
         let count: i64 =
             self.conn
-                .query_row("SELECT COUNT(*) FROM caches", [], |row| row.get(0))?;
+                .query_row("SELECT COUNT(*) FROM caches WHERE deleted_at = 0", [], |row| row.get(0))?;
         self.get_caches(0, count.max(1))
+    }
+
+    /// get_all_caches_including_deleted returns all records including soft-deleted ones.
+    /// Used by sync merge to see the full picture.
+    pub fn get_all_caches_including_deleted(&self) -> SqlResult<Vec<CacheItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+             FROM caches
+             ORDER BY created_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CacheItem {
+                id: row.get(0)?,
+                cache_type: row.get(1)?,
+                content: row.get(2)?,
+                html_content: row.get(3)?,
+                image_data_url: row.get(4)?,
+                image_hash: row.get(5)?,
+                created_at: row.get(6)?,
+                content_length: row.get(7)?,
+                tags: Vec::new(),
+                pinned: row.get::<_, i32>(8)? != 0,
+                pinned_at: row.get(9)?,
+                language: row.get(10)?,
+                updated_at: row.get(11)?,
+                deleted_at: row.get::<_, i64>(12).unwrap_or(0),
+            })
+        })?;
+
+        let mut items: Vec<CacheItem> = Vec::new();
+        for row in rows {
+            let mut item = row?;
+            item.tags = self.get_tags_for_cache(&item.id)?;
+            items.push(item);
+        }
+        Ok(items)
     }
 
     fn get_tags_for_cache(&self, cache_id: &str) -> SqlResult<Vec<String>> {
@@ -264,8 +350,8 @@ impl Database {
 
         self.conn.execute(
             "INSERT INTO caches (id, cache_type, content, html_content, image_data_url, image_hash,
-                                 created_at, content_length, pinned, pinned_at, language)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                 created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 item.id,
                 item.cache_type,
@@ -278,6 +364,8 @@ impl Database {
                 item.pinned as i32,
                 item.pinned_at,
                 item.language,
+                item.updated_at,
+                item.deleted_at,
             ],
         )?;
 
@@ -316,18 +404,71 @@ impl Database {
         Ok(())
     }
 
-    /// remove_cache deletes a single cache record by id.
+    /// remove_cache soft-deletes a single cache record by id (moves to trash).
+    /// The record stays in the database with a deleted_at timestamp.
     pub fn remove_cache(&self, id: &str) -> SqlResult<bool> {
-        let affected = self
-            .conn
-            .execute("DELETE FROM caches WHERE id = ?1", params![id])?;
+        let now = chrono_now_ms();
+        // Record deletion for sync propagation
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pending_deleted (id, deleted_at) VALUES (?1, ?2)",
+            params![id, now],
+        )?;
+        // Soft-delete: set deleted_at instead of physically removing
+        let affected = self.conn.execute(
+            "UPDATE caches SET deleted_at = ?1 WHERE id = ?2 AND deleted_at = 0",
+            params![now, id],
+        )?;
         Ok(affected > 0)
     }
 
-    /// clear_all_caches removes all cache records.
+    /// clear_all_caches soft-deletes all active cache records (moves to trash).
     pub fn clear_all_caches(&self) -> SqlResult<()> {
-        self.conn.execute("DELETE FROM cache_tags", [])?;
-        self.conn.execute("DELETE FROM caches", [])?;
+        let now = chrono_now_ms();
+        // Record all active IDs as deleted for sync propagation
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pending_deleted (id, deleted_at)
+             SELECT id, ?1 FROM caches WHERE deleted_at = 0",
+            params![now],
+        )?;
+        // Soft-delete all active records
+        self.conn.execute(
+            "UPDATE caches SET deleted_at = ?1 WHERE deleted_at = 0",
+            params![now],
+        )?;
+        Ok(())
+    }
+
+    /// get_pending_deleted returns all locally-deleted record IDs pending sync.
+    pub fn get_pending_deleted(&self) -> SqlResult<Vec<(String, i64)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, deleted_at FROM pending_deleted")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<SqlResult<Vec<(String, i64)>>>()?;
+        Ok(rows)
+    }
+
+    /// clear_pending_deleted removes all entries from the pending_deleted table.
+    pub fn clear_pending_deleted(&self) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM pending_deleted", [])?;
+        Ok(())
+    }
+
+    /// get_pending_restored returns all locally-restored record IDs pending sync.
+    pub fn get_pending_restored(&self) -> SqlResult<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM pending_restored")?;
+        let rows = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<SqlResult<Vec<String>>>()?;
+        Ok(rows)
+    }
+
+    /// clear_pending_restored removes all entries from the pending_restored table.
+    pub fn clear_pending_restored(&self) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM pending_restored", [])?;
         Ok(())
     }
 
@@ -350,6 +491,10 @@ impl Database {
                 params![id, tag],
             )?;
         }
+        self.conn.execute(
+            "UPDATE caches SET updated_at = ?1 WHERE id = ?2",
+            params![chrono_now_ms(), id],
+        )?;
         Ok(true)
     }
 
@@ -357,8 +502,8 @@ impl Database {
     pub fn update_cache_content(&self, id: &str, content: &str) -> SqlResult<bool> {
         let content_length = content.chars().count() as i64;
         let affected = self.conn.execute(
-            "UPDATE caches SET content = ?1, content_length = ?2 WHERE id = ?3",
-            params![content, content_length, id],
+            "UPDATE caches SET content = ?1, content_length = ?2, updated_at = ?3 WHERE id = ?4",
+            params![content, content_length, chrono_now_ms(), id],
         )?;
         Ok(affected > 0)
     }
@@ -366,8 +511,8 @@ impl Database {
     /// update_cache_language updates the syntax highlighting language of a cache record.
     pub fn update_cache_language(&self, id: &str, language: Option<&str>) -> SqlResult<bool> {
         let affected = self.conn.execute(
-            "UPDATE caches SET language = ?1 WHERE id = ?2",
-            params![language, id],
+            "UPDATE caches SET language = ?1, updated_at = ?2 WHERE id = ?3",
+            params![language, chrono_now_ms(), id],
         )?;
         Ok(affected > 0)
     }
@@ -380,16 +525,17 @@ impl Database {
             |row| row.get(0),
         )?;
 
+        let now = chrono_now_ms();
         let new_pinned = if current_pinned == 0 { 1 } else { 0 };
         let pinned_at = if new_pinned == 1 {
-            Some(chrono_now_ms())
+            Some(now)
         } else {
             None
         };
 
         self.conn.execute(
-            "UPDATE caches SET pinned = ?1, pinned_at = ?2 WHERE id = ?3",
-            params![new_pinned, pinned_at, id],
+            "UPDATE caches SET pinned = ?1, pinned_at = ?2, updated_at = ?3 WHERE id = ?4",
+            params![new_pinned, pinned_at, now, id],
         )?;
 
         Ok(new_pinned == 1)
@@ -416,10 +562,10 @@ impl Database {
 
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT c.id, c.cache_type, c.content, c.html_content, c.image_data_url,
-                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language
+                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language, c.updated_at, c.deleted_at
              FROM caches c
              LEFT JOIN cache_tags ct ON c.id = ct.cache_id
-             WHERE LOWER(c.content) LIKE ?1 ESCAPE '\\' OR LOWER(ct.tag) LIKE ?1 ESCAPE '\\'
+             WHERE c.deleted_at = 0 AND (LOWER(c.content) LIKE ?1 ESCAPE '\\' OR LOWER(ct.tag) LIKE ?1 ESCAPE '\\')
              ORDER BY c.pinned DESC,
                       CASE WHEN c.pinned = 1 THEN c.pinned_at ELSE c.created_at END DESC
              LIMIT ?2 OFFSET ?3",
@@ -439,6 +585,8 @@ impl Database {
                 pinned: row.get::<_, i32>(8)? != 0,
                 pinned_at: row.get(9)?,
                 language: row.get(10)?,
+                updated_at: row.get(11)?,
+                deleted_at: row.get::<_, i64>(12).unwrap_or(0),
             })
         })?;
 
@@ -471,14 +619,14 @@ impl Database {
         Ok(tags)
     }
 
-    /// get_storage_stats returns storage usage information.
+    /// get_storage_stats returns storage usage information (active records only).
     pub fn get_storage_stats(&self) -> SqlResult<StorageStats> {
         let total_records: i64 =
             self.conn
-                .query_row("SELECT COUNT(*) FROM caches", [], |row| row.get(0))?;
+                .query_row("SELECT COUNT(*) FROM caches WHERE deleted_at = 0", [], |row| row.get(0))?;
 
         let total_size: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(LENGTH(content) + COALESCE(LENGTH(html_content),0) + COALESCE(LENGTH(image_data_url),0)), 0) FROM caches",
+            "SELECT COALESCE(SUM(LENGTH(content) + COALESCE(LENGTH(html_content),0) + COALESCE(LENGTH(image_data_url),0)), 0) FROM caches WHERE deleted_at = 0",
             [],
             |row| row.get(0),
         )?;
@@ -546,6 +694,104 @@ impl Database {
         Ok(())
     }
 
+    // ===== Trash Bin (soft-delete) =====
+
+    /// soft_delete_cache marks a record as soft-deleted with the given timestamp.
+    pub fn soft_delete_cache(&self, id: &str, deleted_at: i64) -> SqlResult<bool> {
+        let affected = self.conn.execute(
+            "UPDATE caches SET deleted_at = ?1 WHERE id = ?2 AND deleted_at = 0",
+            params![deleted_at, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// restore_cache restores a soft-deleted record back to active state.
+    /// Also tracks the restoration for sync (pending_restored) and removes
+    /// the ID from pending_deleted so it won't be pushed as a deletion.
+    pub fn restore_cache(&self, id: &str) -> SqlResult<bool> {
+        let now = chrono_now_ms();
+        let affected = self.conn.execute(
+            "UPDATE caches SET deleted_at = 0, updated_at = ?1 WHERE id = ?2 AND deleted_at != 0",
+            params![now, id],
+        )?;
+        if affected > 0 {
+            // Track restoration for sync: prevent cloud deleted_ids from re-deleting
+            self.conn.execute(
+                "INSERT OR REPLACE INTO pending_restored (id, restored_at) VALUES (?1, ?2)",
+                params![id, now],
+            )?;
+            // Remove from pending_deleted so we don't push deletion to cloud again
+            self.conn.execute(
+                "DELETE FROM pending_deleted WHERE id = ?1",
+                params![id],
+            )?;
+        }
+        Ok(affected > 0)
+    }
+
+    /// get_deleted_caches returns all soft-deleted records.
+    pub fn get_deleted_caches(&self) -> SqlResult<Vec<CacheItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+             FROM caches
+             WHERE deleted_at != 0
+             ORDER BY deleted_at DESC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(CacheItem {
+                id: row.get(0)?,
+                cache_type: row.get(1)?,
+                content: row.get(2)?,
+                html_content: row.get(3)?,
+                image_data_url: row.get(4)?,
+                image_hash: row.get(5)?,
+                created_at: row.get(6)?,
+                content_length: row.get(7)?,
+                tags: Vec::new(),
+                pinned: row.get::<_, i32>(8)? != 0,
+                pinned_at: row.get(9)?,
+                language: row.get(10)?,
+                updated_at: row.get(11)?,
+                deleted_at: row.get::<_, i64>(12).unwrap_or(0),
+            })
+        })?;
+
+        let mut items: Vec<CacheItem> = Vec::new();
+        for row in rows {
+            let mut item = row?;
+            item.tags = self.get_tags_for_cache(&item.id)?;
+            items.push(item);
+        }
+        Ok(items)
+    }
+
+    /// purge_expired_caches permanently removes soft-deleted records older than ttl_ms.
+    pub fn purge_expired_caches(&self, ttl_ms: i64) -> SqlResult<i64> {
+        let now = chrono_now_ms();
+        let cutoff = now - ttl_ms;
+        let affected = self.conn.execute(
+            "DELETE FROM caches WHERE deleted_at != 0 AND deleted_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(affected as i64)
+    }
+
+    /// permanent_delete_cache permanently removes a record (even if soft-deleted).
+    /// Records the deletion in pending_deleted for sync propagation.
+    pub fn permanent_delete_cache(&self, id: &str) -> SqlResult<bool> {
+        let now = chrono_now_ms();
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pending_deleted (id, deleted_at) VALUES (?1, ?2)",
+            params![id, now],
+        )?;
+        let affected = self
+            .conn
+            .execute("DELETE FROM caches WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
     /// export_caches returns all caches as a JSON string.
     pub fn export_caches(&self) -> SqlResult<String> {
         let caches = self.get_all_caches()?;
@@ -563,6 +809,7 @@ impl Database {
                     "tags": c.tags,
                     "pinned": c.pinned,
                     "pinned_at": c.pinned_at.unwrap_or(0),
+                    "updated_at": c.updated_at,
                 });
                 if let Some(ref h) = c.html_content {
                     obj["html_content"] = serde_json::Value::String(h.clone());
@@ -641,6 +888,11 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
         id
     };
 
+    let created_at = rec
+        .get("created_at")
+        .and_then(|v| v.as_i64())
+        .unwrap_or_else(chrono_now_ms);
+
     CacheItem {
         id,
         cache_type: cache_type.clone(),
@@ -657,10 +909,7 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
             .get("image_hash")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        created_at: rec
-            .get("created_at")
-            .and_then(|v| v.as_i64())
-            .unwrap_or_else(chrono_now_ms),
+        created_at,
         content_length: rec
             .get("content_length")
             .and_then(|v| v.as_i64())
@@ -683,6 +932,14 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
             .get("language")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
+        updated_at: rec
+            .get("updated_at")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(created_at),
+        deleted_at: rec
+            .get("deleted_at")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
     }
 }
 
@@ -693,7 +950,7 @@ pub fn generate_id() -> String {
     format!("{}_{:08x}", ts, rand & 0xFFFFFFFF)
 }
 
-fn chrono_now_ms() -> i64 {
+pub fn chrono_now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

@@ -31,6 +31,8 @@
 |------|------|
 | 剪切板缓存 | 点击缓存剪切板内容，支持文本、图片、HTML 富文本 |
 | 快捷复制 | 一键复制，显示"已复制 ✓"反馈 |
+| 云同步 | 通过 GitHub Gist 跨设备同步剪贴板数据，支持自动同步 |
+| 回收站 | 软删除，保留 30 天；支持恢复或永久删除 |
 | 内联编辑 | 浮动工具栏直接编辑文本内容，离开前确认未保存变更 |
 | 全屏查看 | 新标签页全屏展示，支持编辑和语法高亮 |
 | 语法高亮 | 代码块高亮渲染，支持 30 种语言 |
@@ -116,7 +118,13 @@ clipstash-ext/
 ├── popup/
 │   ├── popup.html             # 弹出页面
 │   ├── popup.css              # 样式
-│   └── popup.js               # 交互逻辑
+│   ├── popup.js               # 交互逻辑（模块编排）
+│   └── modules/
+│       ├── card-renderer.js   # 卡片列表渲染
+│       ├── modal-controller.js # 详情弹窗逻辑
+│       ├── settings-panel.js  # 设置面板
+│       ├── sync-ui.js         # 同步界面及 GitHub Gist 配置
+│       └── trash-panel.js     # 回收站面板
 ├── background/
 │   └── service-worker.js      # Service Worker
 ├── offscreen/
@@ -126,12 +134,19 @@ clipstash-ext/
 │   ├── fullscreen.html        # 全屏页面（新标签页）
 │   ├── fullscreen.css         # 全屏样式
 │   └── fullscreen.js          # 全屏逻辑
+├── shared/                    # 共享模块（从根目录 shared/ 符号链接）
+│   ├── constants.js           # 共享常量
+│   ├── dom-utils.js           # DOM 工具函数
+│   ├── fullscreen-controller.js # 全屏页面控制器
+│   ├── icons.js               # SVG 图标定义
+│   └── messages.js            # 基础国际化翻译
 ├── utils/
 │   ├── storage.js             # 存储封装
 │   ├── clipboard.js           # 剪切板封装
 │   ├── time.js                # 相对时间
 │   ├── i18n.js                # 国际化
-│   └── constants.js           # 共享常量
+│   ├── constants.js           # 扩展特定常量
+│   └── sync.js                # GitHub Gist 同步客户端
 ├── vendor/
 │   ├── highlight.min.js       # 语法高亮引擎
 │   ├── hljs-light.css         # 浅色高亮主题
@@ -146,8 +161,8 @@ clipstash-ext/
 ## 隐私
 
 - 不收集任何用户数据
-- 不进行任何网络请求
 - 所有数据仅存储在本地（`chrome.storage.local`）
+- 可选通过 GitHub Gist 云同步（用户自主控制；仅在启用时连接 `api.github.com`）
 
 ## 相关项目
 

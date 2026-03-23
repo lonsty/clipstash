@@ -25,6 +25,8 @@
 
 - **Clipboard caching** — text, images (PNG / JPEG), and HTML rich text
 - **Deduplication** — SHA-256 hash for images, exact match for text
+- **Cloud Sync** — sync clipboard data across devices via GitHub Gist with auto-sync support
+- **Trash bin** — soft delete with 30-day retention, restore or permanently delete
 - **System tray** — lives in the menu bar / taskbar; popover-style window
 - **Global hotkey** — `Alt+Shift+C` (customizable) to cache clipboard instantly
 - **Clipboard monitoring** — optional auto-cache on clipboard change
@@ -34,7 +36,7 @@
 - **Import / export** — JSON-based data portability
 - **Themes** — System / Light / Dark with full CSS variable system
 - **i18n** — English & 中文
-- **Privacy first** — all data stored locally in SQLite, zero network requests
+- **Privacy first** — all data stored locally in SQLite; optional cloud sync via GitHub Gist (user-controlled)
 
 ## Screenshot
 
@@ -153,8 +155,9 @@ clipstash-desktop/
 │       ├── lib.rs                 # App setup & plugin registration
 │       ├── tray.rs                # System tray management
 │       ├── clipboard.rs           # Clipboard read / write
-│       ├── commands.rs            # Tauri commands (22)
+│       ├── commands.rs            # Tauri commands
 │       ├── db.rs                  # SQLite database layer (WAL)
+│       ├── sync.rs                # GitHub Gist cloud sync
 │       ├── hotkey.rs              # Global shortcut registration
 │       └── monitor.rs             # Clipboard auto-monitoring (500ms)
 ├── src/                           # Frontend (Vanilla JS)
@@ -167,14 +170,27 @@ clipstash-desktop/
 │   │   ├── main.css               # Main styles (Light / Dark / System)
 │   │   └── fullscreen.css         # Fullscreen view styles
 │   ├── scripts/
-│   │   ├── main.js                # Main logic
+│   │   ├── main.js                # Main logic (module orchestrator)
 │   │   ├── fullscreen.js          # Fullscreen view logic
-│   │   └── sticky.js              # Sticky note logic
+│   │   ├── sticky.js              # Sticky note logic
+│   │   └── modules/
+│   │       ├── card-renderer.js   # Card list rendering
+│   │       ├── modal-controller.js # Detail modal logic
+│   │       ├── settings-panel.js  # Settings panel
+│   │       ├── sync-ui.js         # Sync UI & GitHub Gist config
+│   │       └── trash-panel.js     # Trash bin panel
+│   ├── shared/                    # Shared modules (synced from root shared/)
+│   │   ├── constants.js           # Shared constants
+│   │   ├── dom-utils.js           # DOM utility functions
+│   │   ├── fullscreen-controller.js # Fullscreen page controller
+│   │   ├── icons.js               # SVG icon definitions
+│   │   └── messages.js            # Base i18n messages
 │   └── utils/
 │       ├── bridge.js              # Tauri invoke wrapper
-│       ├── i18n.js                # i18n (EN / 中文, 80+ keys)
+│       ├── i18n.js                # i18n (EN / 中文)
 │       ├── logger.js              # Frontend log forwarding (tauri-plugin-log)
 │       ├── storage.js             # Storage abstraction
+│       ├── sync.js                # Sync client (frontend)
 │       └── time.js                # Relative time formatting
 ├── package.json
 ├── CHANGELOG.md

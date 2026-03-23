@@ -1,61 +1,22 @@
 // ClipStash Sticky Note Page - Interaction logic
 // A lightweight always-on-top window that displays a single clipboard item.
-// Loads item data via Tauri invoke, similar to fullscreen.js.
+// Loads item data via Tauri invoke.
 
 import { getSettings, getTheme } from '../utils/storage.js';
 import { initLang, t } from '../utils/i18n.js';
-
-const { invoke } = window.__TAURI__.core;
+import { writeClipboard, getCacheById } from '../utils/bridge.js';
+import { ICON_COPY, ICON_CHECK } from '../shared/icons.js';
+import { highlightCode, applyThemeToDocument } from '../shared/dom-utils.js';
+import { COPY_FEEDBACK_DURATION } from '../shared/constants.js';
 
 // ===== DOM References =====
 
 const stickyContent = document.getElementById('sticky-content');
 const btnCopy = document.getElementById('btn-copy');
 
-// ===== SVG Icons =====
-
-const ICON_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-</svg>`;
-
-const ICON_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="color: var(--success)">
-  <polyline points="20 6 9 17 4 12"/>
-</svg>`;
-
 // ===== State =====
 
 let currentItem = null;
-
-// ===== Utility Functions =====
-
-function highlightCode(text, language) {
-  if (!language || typeof hljs === 'undefined') return escapeHtml(text);
-  try {
-    const result = hljs.highlight(text, { language, ignoreIllegals: true });
-    return result.value;
-  } catch {
-    return escapeHtml(text);
-  }
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// ===== Theme =====
-
-function applyTheme(theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  const isDark = theme === 'dark' ||
-    (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const hljsThemeEl = document.getElementById('hljs-theme');
-  if (hljsThemeEl) {
-    hljsThemeEl.href = isDark ? 'vendor/hljs-dark.css' : 'vendor/hljs-light.css';
-  }
-}
 
 // ===== Copy =====
 
@@ -65,18 +26,18 @@ function showCopyFeedback() {
   setTimeout(() => {
     btnCopy.innerHTML = ICON_COPY;
     btnCopy.classList.remove('copied');
-  }, 1500);
+  }, COPY_FEEDBACK_DURATION);
 }
 
 async function copyToClipboard() {
   if (!currentItem) return;
   try {
-    await invoke('write_clipboard', {
-      contentType: currentItem.type || 'text',
-      content: currentItem.content || '',
-      htmlContent: currentItem.htmlContent || null,
-      imageDataUrl: currentItem.imageDataUrl || null,
-    });
+    await writeClipboard(
+      currentItem.type || 'text',
+      currentItem.content || '',
+      currentItem.htmlContent || null,
+      currentItem.imageDataUrl || null
+    );
     showCopyFeedback();
   } catch {
     try {
@@ -144,14 +105,14 @@ async function init() {
   initLang(settings.language || 'en');
 
   const theme = await getTheme();
-  applyTheme(theme);
+  applyThemeToDocument(theme, 'vendor');
 
   // Update copy button title with i18n
   btnCopy.title = t('copy');
 
   // Load the cache item by ID
   try {
-    currentItem = await invoke('get_cache_by_id', { id: itemId });
+    currentItem = await getCacheById(itemId);
   } catch (err) {
     stickyContent.textContent = `Error loading item: ${err}`;
     return;

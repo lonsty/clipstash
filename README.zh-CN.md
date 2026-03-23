@@ -25,7 +25,7 @@
 | [**clipstash-ext**](clipstash-ext/) | Chrome 浏览器扩展 | Manifest V3, Vanilla JS, chrome.storage.local |
 | [**clipstash-desktop**](clipstash-desktop/) | 跨平台桌面客户端 | Tauri 2.x, Rust, Vanilla JS, SQLite |
 
-两个项目在代码和运行时上**相互独立**，可以单独开发、构建和使用。唯一的跨项目依赖是 `clipstash-desktop` 在生成应用图标时会读取 `clipstash-ext/icons/icon128.png` 作为源图（仅构建时）。
+两个项目在代码和运行时上**相互独立**，可以单独开发、构建和使用。它们共享一个 `shared/` 模块目录（常量、国际化翻译、图标、DOM 工具函数），Extension 通过符号链接引用，Desktop 通过 `sync-shared.sh` 同步。通过 GitHub Gist 云同步功能可实现跨设备数据共享。
 
 ### 浏览器扩展
 

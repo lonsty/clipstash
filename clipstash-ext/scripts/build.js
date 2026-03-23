@@ -13,6 +13,7 @@ const COPY_LIST = [
   'offscreen/',
   'fullscreen/',
   'utils/',
+  'shared/',
   'vendor/',
   'icons/'
 ];

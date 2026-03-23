@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-23
+
+### Added
+
+- **Cloud Sync** — sync clipboard data across devices via GitHub Gist; connect with a fine-grained PAT (Gists read/write scope)
+- **Auto Sync** — automatically push local changes and periodically pull remote updates (5-minute interval)
+- **Quick Sync button** — header shortcut button for one-click manual sync
+- **Sync status indicator** — extension badge shows sync state (syncing / connected / error)
+- **Trash bin** — soft delete with 30-day retention; records can be restored or permanently deleted
+- **Trash batch actions** — "Restore All" and "Empty Trash" buttons
+- **Delete All Permanently** — danger zone action in settings to permanently wipe all data (active + trash)
+- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js` for code reuse between Extension and Desktop
+- **Modular architecture** — `popup.js` refactored into modules: `card-renderer.js`, `modal-controller.js`, `trash-panel.js`, `sync-ui.js`, `settings-panel.js`
+
+### Changed
+
+- **i18n architecture** — shared `BASE_MESSAGES` + platform-specific `EXT_MESSAGES`; `mergeMessages()` function for composability
+- **Time formatting** — delegated to shared `dom-utils.js` with dependency-injected `t()` function
+- **Code organization** — `popup.js` reduced from ~1200 lines to ~290 lines via module extraction; `fullscreen.js` now uses shared `fullscreen-controller.js`
+- **Service worker** — added `try/catch` around `chrome.action.openPopup()` for robustness in restricted contexts
+- **Manifest** — added `alarms` permission and `host_permissions` for GitHub API
+- **Storage layer** — added trash operations, sync data conversion, and GitHub Gist API integration
+
+### Fixed
+
+- **Sync data format** — `updated_at` field correctly included in snake_case record conversion
+
 ## [0.1.3] - 2026-03-20
 
 ### Added
@@ -94,6 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Manifest V3** — supports Chrome 104+
 - **Zero dependencies** — pure frontend, no runtime dependencies, no network requests
 
+[0.2.0]: https://github.com/lonsty/clipstash/releases/tag/v0.2.0
 [0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

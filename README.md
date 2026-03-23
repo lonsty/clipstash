@@ -25,7 +25,7 @@ This repository contains two implementations of ClipStash:
 | [**clipstash-ext**](clipstash-ext/) | Chrome browser extension | Manifest V3, Vanilla JS, chrome.storage.local |
 | [**clipstash-desktop**](clipstash-desktop/) | Cross-platform desktop app | Tauri 2.x, Rust, Vanilla JS, SQLite |
 
-The two projects are **independent** in terms of code and runtime — each can be developed, built, and used on its own. The only cross-project dependency is that `clipstash-desktop` reads the icon source from `clipstash-ext/icons/icon128.png` when generating app icons (build-time only).
+The two projects are **independent** in terms of code and runtime — each can be developed, built, and used on its own. They share a `shared/` module directory (constants, i18n messages, icons, DOM utilities) that is symlinked for the Extension and synced via `sync-shared.sh` for the Desktop app. Cloud Sync via GitHub Gist allows data to be shared across devices.
 
 ### Browser Extension
 

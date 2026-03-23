@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod hotkey;
 mod monitor;
+mod sync;
 mod tray;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -148,6 +149,16 @@ pub fn run() {
             commands::open_sticky_window,
             commands::set_suppress_auto_hide,
             commands::update_tray_menu,
+            commands::get_sync_settings,
+            commands::save_sync_settings,
+            commands::validate_sync_token,
+            commands::init_cloud_sync,
+            commands::perform_cloud_sync,
+            commands::disconnect_cloud_sync,
+            commands::get_deleted_caches,
+            commands::restore_cache,
+            commands::permanent_delete_cache,
+            commands::purge_expired_caches,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

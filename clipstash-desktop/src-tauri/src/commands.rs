@@ -1,6 +1,8 @@
 use crate::clipboard as clip;
 use crate::db::{self, CacheItem, ImportResult, Settings, StorageStats};
+use crate::sync::{self, SyncResult, SyncSettings};
 use crate::AppState;
+use std::collections::HashSet;
 use tauri::{Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 #[tauri::command]
@@ -63,6 +65,7 @@ pub fn add_cache(
     pinned_at: Option<i64>,
 ) -> Result<bool, String> {
     let ct = cache_type.clone();
+    let now = created_at;
     let item = CacheItem {
         id,
         cache_type,
@@ -76,6 +79,8 @@ pub fn add_cache(
         pinned,
         pinned_at,
         language: None,
+        updated_at: now,
+        deleted_at: 0,
     };
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let result = db.add_cache(&item).map_err(|e| {
@@ -417,4 +422,182 @@ pub fn update_tray_menu(
     }
 
     Ok(())
+}
+
+// ===== Cloud Sync Commands =====
+
+// ===== Trash Bin Commands =====
+
+#[tauri::command]
+pub fn get_deleted_caches(state: State<AppState>) -> Result<Vec<CacheItem>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_deleted_caches().map_err(|e| {
+        log::error!("Failed to get deleted caches: {}", e);
+        e.to_string()
+    })
+}
+
+#[tauri::command]
+pub fn restore_cache(state: State<AppState>, id: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let result = db.restore_cache(&id).map_err(|e| {
+        log::error!("Failed to restore cache {}: {}", id, e);
+        e.to_string()
+    })?;
+    log::info!("Restored cache: id={}", id);
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn permanent_delete_cache(state: State<AppState>, id: String) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let result = db.permanent_delete_cache(&id).map_err(|e| {
+        log::error!("Failed to permanently delete cache {}: {}", id, e);
+        e.to_string()
+    })?;
+    log::info!("Permanently deleted cache: id={}", id);
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn purge_expired_caches(state: State<AppState>, ttl_ms: i64) -> Result<i64, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let purged = db.purge_expired_caches(ttl_ms).map_err(|e| {
+        log::error!("Failed to purge expired caches: {}", e);
+        e.to_string()
+    })?;
+    if purged > 0 {
+        log::info!("Purged {} expired soft-deleted caches", purged);
+    }
+    Ok(purged)
+}
+
+#[tauri::command]
+pub fn get_sync_settings(state: State<AppState>) -> Result<SyncSettings, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(db.get_sync_settings())
+}
+
+#[tauri::command]
+pub fn save_sync_settings(state: State<AppState>, settings: SyncSettings) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.save_sync_settings(&settings).map_err(|e| {
+        log::error!("Failed to save sync settings: {}", e);
+        e.to_string()
+    })?;
+    log::info!("Saved sync settings: enabled={}, autoSync={}", settings.enabled, settings.auto_sync);
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn validate_sync_token(token: String) -> Result<String, String> {
+    let username = sync::validate_token(&token).await?;
+    log::info!("Validated sync token: user={}", username);
+    Ok(username)
+}
+
+#[tauri::command]
+pub async fn init_cloud_sync(state: State<'_, AppState>, token: String) -> Result<SyncSettings, String> {
+    let (gist_id, username) = sync::init_sync(&token).await?;
+
+    let settings = SyncSettings {
+        token: token.clone(),
+        gist_id: gist_id.clone(),
+        enabled: true,
+        last_sync_at: 0,
+        auto_sync: true,
+    };
+
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.save_sync_settings(&settings).map_err(|e| {
+            log::error!("Failed to save sync settings: {}", e);
+            e.to_string()
+        })?;
+    }
+
+    log::info!("Initialized cloud sync: user={}, gist_id={}", username, gist_id);
+    Ok(settings)
+}
+
+#[tauri::command]
+pub async fn perform_cloud_sync(state: State<'_, AppState>) -> Result<SyncResult, String> {
+    let (token, gist_id, local_caches, pending_deleted, pending_restored) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let sync_settings = db.get_sync_settings();
+        if !sync_settings.enabled || sync_settings.token.is_empty() || sync_settings.gist_id.is_empty() {
+            return Err("Sync not configured".to_string());
+        }
+        // Use get_all_caches_including_deleted so sync merge can see soft-deleted records
+        let caches = db.get_all_caches_including_deleted().map_err(|e| e.to_string())?;
+        let deleted = db.get_pending_deleted().map_err(|e| e.to_string())?;
+        let restored = db.get_pending_restored().map_err(|e| e.to_string())?;
+        (sync_settings.token, sync_settings.gist_id, caches, deleted, restored)
+    };
+
+    let (result, merged_caches) = sync::perform_sync(&token, &gist_id, local_caches, pending_deleted, pending_restored).await?;
+
+    // Apply merged records to local DB
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+
+        // Collect merged IDs so we can detect stale local records
+        let merged_ids: HashSet<String> =
+            merged_caches.iter().map(|item| item.id.clone()).collect();
+
+        for item in &merged_caches {
+            db.upsert_cache(item).map_err(|e| {
+                log::error!("Failed to upsert cache during sync: id={}, err={}", item.id, e);
+                e.to_string()
+            })?;
+        }
+
+        // Soft-delete local records that were deleted by remote (not in merged_caches)
+        // instead of physically removing them
+        let now = db::chrono_now_ms();
+        let all_local = db.get_all_caches_including_deleted().map_err(|e| e.to_string())?;
+        for local_item in &all_local {
+            if local_item.cache_type != "image" && !merged_ids.contains(&local_item.id) {
+                // Only soft-delete if not already soft-deleted
+                if local_item.deleted_at == 0 {
+                    let _ = db.soft_delete_cache(&local_item.id, now);
+                }
+            }
+        }
+
+        // Purge truly expired soft-deleted records (past 30 days)
+        const DELETED_IDS_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+        let _ = db.purge_expired_caches(DELETED_IDS_TTL_MS);
+
+        // Clear pending lists after successful sync
+        db.clear_pending_deleted().map_err(|e| e.to_string())?;
+        db.clear_pending_restored().map_err(|e| e.to_string())?;
+
+        // Update last_sync_at
+        let mut sync_settings = db.get_sync_settings();
+        sync_settings.last_sync_at = db::chrono_now_ms();
+        db.save_sync_settings(&sync_settings).map_err(|e| e.to_string())?;
+    }
+
+    log::info!(
+        "Cloud sync completed: pulled={}, pushed={}, updated={}, deleted={}",
+        result.pulled,
+        result.pushed,
+        result.updated,
+        result.deleted
+    );
+
+    Ok(result)
+}
+
+#[tauri::command]
+pub fn disconnect_cloud_sync(state: State<AppState>) -> Result<bool, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let settings = SyncSettings::default();
+    db.save_sync_settings(&settings).map_err(|e| {
+        log::error!("Failed to disconnect sync: {}", e);
+        e.to_string()
+    })?;
+    log::info!("Disconnected cloud sync");
+    Ok(true)
 }

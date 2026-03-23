@@ -4,6 +4,31 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-03-23
+
+### 新增
+
+- **云同步** — 通过 GitHub Gist 跨设备同步剪贴板数据；使用细粒度 PAT（Gists 读写权限）连接；支持自动同步（定时推送/拉取）
+- **回收站** — 软删除，保留 30 天；支持恢复或永久删除
+- **回收站批量操作** — "全部恢复"和"清空回收站"按钮
+- **永久删除全部数据** — 设置中的危险操作，可永久清除所有数据（活跃 + 回收站）
+- **共享模块** — 提取 `shared/` 目录，包含 `constants.js`、`messages.js`、`icons.js`、`dom-utils.js`、`fullscreen-controller.js`，供扩展和桌面端共用
+- **模块化架构** — `main.js` 拆分为独立模块：`card-renderer.js`、`modal-controller.js`、`trash-panel.js`、`sync-ui.js`、`settings-panel.js`
+- **同步 Tauri 命令** — 新增 Rust 后端同步命令（`sync_push`、`sync_pull`、`sync_get_config`、`sync_set_config` 等）
+
+### 变更
+
+- **国际化架构** — 共享 `BASE_MESSAGES` + 平台特定消息；`mergeMessages()` 函数实现组合式翻译
+- **时间格式化** — 委托给共享 `dom-utils.js`，通过依赖注入 `t()` 函数
+- **代码组织** — `main.js` 从约 1200 行缩减至约 300 行；`fullscreen.js` 和 `sticky.js` 使用共享 `fullscreen-controller.js`
+- **数据库模式** — 新增 `deleted_at` 列、`sync_meta` 表及回收站相关查询，支持软删除
+- **存储层** — 新增回收站操作（`soft_delete`、`restore`、`empty_trash`、`get_trash_items`）及同步数据转换函数
+- **Rust 依赖** — 新增 `reqwest`（含 JSON 特性）用于 GitHub API 通信
+
+### 修复
+
+- **同步数据格式** — `updated_at` 字段在 snake_case 记录转换中正确包含
+
 ## [0.1.3] - 2026-03-20
 
 ### 新增
@@ -113,6 +138,7 @@
 - **跨平台** — macOS (.app / .dmg)、Windows (.exe)、Linux (.deb / .AppImage)
 - **隐私** — 零网络请求，数据本地存储
 
+[0.2.0]: https://github.com/lonsty/clipstash/releases/tag/v0.2.0
 [0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.1]: https://github.com/lonsty/clipstash/releases/tag/v0.1.1

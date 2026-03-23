@@ -1,36 +1,44 @@
-// ClipStash - Constants configuration
+// ClipStash Extension - Re-export shared constants
+// Single source of truth lives in shared/constants.js
 
-// Storage keys
-export const STORAGE_KEY = 'clipstash-caches';
-export const SETTINGS_KEY = 'clipstash-settings';
-export const THEME_KEY = 'clipstash-theme';
-
-// Default settings
-export const DEFAULT_MAX_CACHE_SIZE = 100;
-
-// UI constants
-export const PAGE_SIZE = 12;
-export const MAX_TAG_LENGTH = 20;
-export const MAX_TAG_SUGGESTIONS = 8;
-
-// Text preview limits
-export const PREVIEW_MAX_LINES = 3;
-export const PREVIEW_MAX_LINE_LENGTH = 80;
-
-// Debounce delays (ms)
-export const SEARCH_DEBOUNCE_DELAY = 250;
-export const FEEDBACK_DISPLAY_DURATION = 1500;
-
-// Cache types
-export const CACHE_TYPE_TEXT = 'text';
-export const CACHE_TYPE_IMAGE = 'image';
-export const CACHE_TYPE_HTML = 'html';
-
-// Theme values
-export const THEME_SYSTEM = 'system';
-export const THEME_LIGHT = 'light';
-export const THEME_DARK = 'dark';
-
-// Language codes
-export const LANG_EN = 'en';
-export const LANG_ZH = 'zh';
+export {
+  STORAGE_KEY,
+  SETTINGS_KEY,
+  THEME_KEY,
+  SYNC_SETTINGS_KEY,
+  PENDING_DELETED_KEY,
+  PENDING_RESTORED_KEY,
+  DEFAULT_MAX_CACHE_SIZE,
+  PAGE_SIZE,
+  MAX_TAG_LENGTH,
+  MAX_TAG_SUGGESTIONS,
+  PREVIEW_MAX_LINES,
+  PREVIEW_MAX_LINE_LENGTH,
+  TRASH_PREVIEW_MAX_LENGTH,
+  SEARCH_DEBOUNCE_DELAY,
+  FEEDBACK_DISPLAY_DURATION,
+  TAG_HINT_DURATION,
+  COPY_FEEDBACK_DURATION,
+  SYNC_PUSH_DEBOUNCE_DELAY,
+  SYNC_MIN_INTERVAL_MS,
+  SYNC_PERIODIC_PULL_INTERVAL,
+  SYNC_PERIODIC_PULL_MS,
+  SYNC_TOAST_DURATION,
+  SYNC_RESULT_DURATION,
+  SYNC_AUTH_PATTERN,
+  TRASH_TTL_MS,
+  DELETED_IDS_TTL_MS,
+  MS_PER_DAY,
+  CACHE_TYPE_TEXT,
+  CACHE_TYPE_IMAGE,
+  CACHE_TYPE_HTML,
+  THEME_SYSTEM,
+  THEME_LIGHT,
+  THEME_DARK,
+  LANG_EN,
+  LANG_ZH,
+  GIST_DATA_FILE,
+  GIST_META_FILE,
+  GIST_DESCRIPTION,
+  GITHUB_API_BASE,
+} from '../shared/constants.js';

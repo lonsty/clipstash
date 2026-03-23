@@ -25,6 +25,8 @@
 
 - **剪切板缓存** — 支持文本、图片（PNG / JPEG）、HTML 富文本
 - **内容去重** — 图片 SHA-256 哈希，文本精确匹配
+- **云同步** — 通过 GitHub Gist 跨设备同步剪贴板数据，支持自动同步
+- **回收站** — 软删除，保留 30 天，支持恢复或永久删除
 - **系统托盘** — 常驻菜单栏/任务栏，弹出式窗口
 - **全局快捷键** — `Alt+Shift+C`（可自定义），一键缓存剪切板
 - **剪切板监听** — 可选自动缓存
@@ -34,7 +36,7 @@
 - **导入导出** — JSON 格式数据迁移
 - **主题** — 跟随系统 / 浅色 / 深色，完整 CSS 变量体系
 - **国际化** — English & 中文
-- **隐私优先** — 数据本地存储于 SQLite，零网络请求
+- **隐私优先** — 数据本地存储于 SQLite；可选通过 GitHub Gist 云同步（用户自主控制）
 
 ## 截图
 
@@ -153,8 +155,9 @@ clipstash-desktop/
 │       ├── lib.rs                 # 初始化与插件注册
 │       ├── tray.rs                # 系统托盘
 │       ├── clipboard.rs           # 剪切板读写
-│       ├── commands.rs            # Tauri 命令（22 个）
+│       ├── commands.rs            # Tauri 命令
 │       ├── db.rs                  # 数据库层（WAL）
+│       ├── sync.rs                # GitHub Gist 云同步
 │       ├── hotkey.rs              # 全局快捷键
 │       └── monitor.rs             # 剪切板监听（500ms）
 ├── src/                           # 前端（Vanilla JS）
@@ -167,14 +170,27 @@ clipstash-desktop/
 │   │   ├── main.css               # 主样式（浅色 / 深色 / 跟随系统）
 │   │   └── fullscreen.css         # 全屏查看样式
 │   ├── scripts/
-│   │   ├── main.js                # 主逻辑
+│   │   ├── main.js                # 主逻辑（模块编排）
 │   │   ├── fullscreen.js          # 全屏查看逻辑
-│   │   └── sticky.js              # 便签逻辑
+│   │   ├── sticky.js              # 便签逻辑
+│   │   └── modules/
+│   │       ├── card-renderer.js   # 卡片列表渲染
+│   │       ├── modal-controller.js # 详情弹窗逻辑
+│   │       ├── settings-panel.js  # 设置面板
+│   │       ├── sync-ui.js         # 同步界面及 GitHub Gist 配置
+│   │       └── trash-panel.js     # 回收站面板
+│   ├── shared/                    # 共享模块（从根目录 shared/ 同步）
+│   │   ├── constants.js           # 共享常量
+│   │   ├── dom-utils.js           # DOM 工具函数
+│   │   ├── fullscreen-controller.js # 全屏页面控制器
+│   │   ├── icons.js               # SVG 图标定义
+│   │   └── messages.js            # 基础国际化翻译
 │   └── utils/
 │       ├── bridge.js              # Tauri 调用封装
-│       ├── i18n.js                # 国际化（EN / 中文，80+ 键值）
+│       ├── i18n.js                # 国际化（EN / 中文）
 │       ├── logger.js              # 前端日志转发（tauri-plugin-log）
 │       ├── storage.js             # 存储封装
+│       ├── sync.js                # 同步客户端（前端）
 │       └── time.js                # 相对时间格式化
 ├── package.json
 ├── CHANGELOG.md

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipStash",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Clipboard cache — stash clipboard content with one click, revisit anytime",
   "permissions": [
     "activeTab",
@@ -10,7 +10,11 @@
     "clipboardRead",
     "clipboardWrite",
     "offscreen",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.github.com/*"
   ],
   "action": {
     "default_icon": {
@@ -44,6 +48,7 @@
         "fullscreen/fullscreen.css",
         "fullscreen/fullscreen.js",
         "popup/popup.css",
+        "popup/modules/*.js",
         "vendor/highlight.min.js",
         "vendor/hljs-light.css",
         "vendor/hljs-dark.css",
@@ -51,6 +56,12 @@
         "utils/constants.js",
         "utils/time.js",
         "utils/i18n.js",
+        "utils/sync.js",
+        "shared/constants.js",
+        "shared/icons.js",
+        "shared/messages.js",
+        "shared/dom-utils.js",
+        "shared/fullscreen-controller.js",
         "icons/icon128.png"
       ],
       "matches": ["<all_urls>"]

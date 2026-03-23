@@ -4,6 +4,33 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-03-23
+
+### 新增
+
+- **云同步** — 通过 GitHub Gist 跨设备同步剪贴板数据；使用细粒度 PAT（Gists 读写权限）连接
+- **自动同步** — 自动推送本地变更，定时拉取远端更新（5 分钟间隔）
+- **快速同步按钮** — 顶栏快捷按钮，一键手动同步
+- **同步状态指示** — 扩展 Badge 显示同步状态（同步中 / 已连接 / 错误）
+- **回收站** — 软删除，保留 30 天；支持恢复或永久删除
+- **回收站批量操作** — "全部恢复"和"清空回收站"按钮
+- **永久删除全部数据** — 设置中的危险操作，可永久清除所有数据（活跃 + 回收站）
+- **共享模块** — 提取 `shared/` 目录，包含 `constants.js`、`messages.js`、`icons.js`、`dom-utils.js`、`fullscreen-controller.js`，供扩展和桌面端共用
+- **模块化架构** — `popup.js` 拆分为独立模块：`card-renderer.js`、`modal-controller.js`、`trash-panel.js`、`sync-ui.js`、`settings-panel.js`
+
+### 变更
+
+- **国际化架构** — 共享 `BASE_MESSAGES` + 平台特定 `EXT_MESSAGES`；`mergeMessages()` 函数实现组合式翻译
+- **时间格式化** — 委托给共享 `dom-utils.js`，通过依赖注入 `t()` 函数
+- **代码组织** — `popup.js` 从约 1200 行缩减至约 290 行；`fullscreen.js` 使用共享 `fullscreen-controller.js`
+- **Service Worker** — 为 `chrome.action.openPopup()` 添加 `try/catch`，提升受限环境下的健壮性
+- **扩展清单** — 新增 `alarms` 权限和 GitHub API 的 `host_permissions`
+- **存储层** — 新增回收站操作、同步数据转换及 GitHub Gist API 集成
+
+### 修复
+
+- **同步数据格式** — `updated_at` 字段在 snake_case 记录转换中正确包含
+
 ## [0.1.3] - 2026-03-20
 
 ### 新增
@@ -93,6 +120,7 @@
 - **Manifest V3** — 支持 Chrome 104+
 - **零依赖** — 纯前端实现，零运行时依赖，零网络请求
 
+[0.2.0]: https://github.com/lonsty/clipstash/releases/tag/v0.2.0
 [0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3
 [0.1.2]: https://github.com/lonsty/clipstash/releases/tag/v0.1.2
 [0.1.0]: https://github.com/lonsty/clipstash/releases/tag/v0.1.0

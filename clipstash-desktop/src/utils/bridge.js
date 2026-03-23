@@ -187,3 +187,47 @@ export async function showOpenDialog() {
 }
 
 export { writeTextFile, readTextFile, openUrl };
+
+// ===== Cloud Sync =====
+
+export async function getSyncSettings() {
+  return await invoke('get_sync_settings');
+}
+
+export async function saveSyncSettings(settings) {
+  return await invoke('save_sync_settings', { settings });
+}
+
+export async function validateSyncToken(token) {
+  return await invoke('validate_sync_token', { token });
+}
+
+export async function initCloudSync(token) {
+  return await invoke('init_cloud_sync', { token });
+}
+
+export async function performCloudSync() {
+  return await invoke('perform_cloud_sync');
+}
+
+export async function disconnectCloudSync() {
+  return await invoke('disconnect_cloud_sync');
+}
+
+// ===== Trash Bin =====
+
+export async function getDeletedCaches() {
+  return await invoke('get_deleted_caches');
+}
+
+export async function restoreCache(id) {
+  return await invoke('restore_cache', { id });
+}
+
+export async function permanentDeleteCache(id) {
+  return await invoke('permanent_delete_cache', { id });
+}
+
+export async function purgeExpiredCaches(ttlMs) {
+  return await invoke('purge_expired_caches', { ttlMs });
+}
