@@ -14,6 +14,11 @@ pub struct CacheItem {
     pub image_data_url: Option<String>,
     #[serde(rename = "imageHash")]
     pub image_hash: Option<String>,
+    /// content_hash is a short SHA-256 hash of (type + content) for cross-device dedup.
+    /// For text/html: first 16 hex chars of SHA-256(type + "\0" + content).
+    /// For image: reuses image_hash.
+    #[serde(rename = "contentHash")]
+    pub content_hash: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: i64,
     #[serde(rename = "contentLength")]
@@ -172,6 +177,32 @@ impl Database {
             conn.execute_batch("ALTER TABLE caches ADD COLUMN deleted_at INTEGER NOT NULL DEFAULT 0")?;
         }
 
+        // Migration: add content_hash column if missing (cross-device content dedup)
+        let has_content_hash: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('caches') WHERE name='content_hash'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|c| c > 0)
+            .unwrap_or(false);
+        if !has_content_hash {
+            conn.execute_batch("ALTER TABLE caches ADD COLUMN content_hash TEXT")?;
+            // Backfill: compute content_hash for existing records
+            let mut stmt = conn.prepare("SELECT id, cache_type, content, image_hash FROM caches WHERE content_hash IS NULL")?;
+            let rows: Vec<(String, String, String, Option<String>)> = stmt
+                .query_map([], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                })?
+                .collect::<SqlResult<Vec<_>>>()?;
+            for (id, cache_type, content, image_hash) in &rows {
+                let hash = compute_content_hash(cache_type, content, image_hash.as_deref());
+                if !hash.is_empty() {
+                    conn.execute(
+                        "UPDATE caches SET content_hash = ?1 WHERE id = ?2",
+                        params![hash, id],
+                    )?;
+                }
+            }
+        }
+
         Ok(Self {
             conn,
             db_path: path.to_string(),
@@ -182,7 +213,7 @@ impl Database {
     pub fn get_cache_by_id(&self, id: &str) -> SqlResult<Option<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash
              FROM caches WHERE id = ?1",
         )?;
 
@@ -194,6 +225,7 @@ impl Database {
                 html_content: row.get(3)?,
                 image_data_url: row.get(4)?,
                 image_hash: row.get(5)?,
+                content_hash: row.get(13)?,
                 created_at: row.get(6)?,
                 content_length: row.get(7)?,
                 tags: Vec::new(),
@@ -219,7 +251,7 @@ impl Database {
     pub fn get_caches(&self, offset: i64, limit: i64) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash
              FROM caches
              WHERE deleted_at = 0
              ORDER BY pinned DESC, CASE WHEN pinned = 1 THEN pinned_at ELSE created_at END DESC
@@ -234,6 +266,7 @@ impl Database {
                 html_content: row.get(3)?,
                 image_data_url: row.get(4)?,
                 image_hash: row.get(5)?,
+                content_hash: row.get(13)?,
                 created_at: row.get(6)?,
                 content_length: row.get(7)?,
                 tags: Vec::new(),
@@ -268,7 +301,7 @@ impl Database {
     pub fn get_all_caches_including_deleted(&self) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash
              FROM caches
              ORDER BY created_at DESC",
         )?;
@@ -281,6 +314,7 @@ impl Database {
                 html_content: row.get(3)?,
                 image_data_url: row.get(4)?,
                 image_hash: row.get(5)?,
+                content_hash: row.get(13)?,
                 created_at: row.get(6)?,
                 content_length: row.get(7)?,
                 tags: Vec::new(),
@@ -348,12 +382,26 @@ impl Database {
             return Ok(false);
         }
 
+        // Ensure ID uniqueness: retry with a new random ID on collision
+        let mut final_id = item.id.clone();
+        loop {
+            let count: i64 = self.conn.query_row(
+                "SELECT COUNT(*) FROM caches WHERE id = ?1",
+                params![final_id],
+                |row| row.get(0),
+            )?;
+            if count == 0 {
+                break;
+            }
+            final_id = generate_id();
+        }
+
         self.conn.execute(
             "INSERT INTO caches (id, cache_type, content, html_content, image_data_url, image_hash,
-                                 created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                 created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
-                item.id,
+                final_id,
                 item.cache_type,
                 item.content,
                 item.html_content,
@@ -366,13 +414,14 @@ impl Database {
                 item.language,
                 item.updated_at,
                 item.deleted_at,
+                item.content_hash,
             ],
         )?;
 
         for tag in &item.tags {
             self.conn.execute(
                 "INSERT OR IGNORE INTO cache_tags (cache_id, tag) VALUES (?1, ?2)",
-                params![item.id, tag],
+                params![final_id, tag],
             )?;
         }
 
@@ -498,12 +547,19 @@ impl Database {
         Ok(true)
     }
 
-    /// update_cache_content updates the content and content_length of a cache record.
+    /// update_cache_content updates the content, content_length, and content_hash of a cache record.
     pub fn update_cache_content(&self, id: &str, content: &str) -> SqlResult<bool> {
+        // Read the cache_type to compute content_hash correctly
+        let cache_type: String = self.conn.query_row(
+            "SELECT cache_type FROM caches WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
         let content_length = content.chars().count() as i64;
+        let content_hash = compute_content_hash(&cache_type, content, None);
         let affected = self.conn.execute(
-            "UPDATE caches SET content = ?1, content_length = ?2, updated_at = ?3 WHERE id = ?4",
-            params![content, content_length, chrono_now_ms(), id],
+            "UPDATE caches SET content = ?1, content_length = ?2, content_hash = ?3, updated_at = ?4 WHERE id = ?5",
+            params![content, content_length, content_hash, chrono_now_ms(), id],
         )?;
         Ok(affected > 0)
     }
@@ -562,7 +618,7 @@ impl Database {
 
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT c.id, c.cache_type, c.content, c.html_content, c.image_data_url,
-                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language, c.updated_at, c.deleted_at
+                    c.image_hash, c.created_at, c.content_length, c.pinned, c.pinned_at, c.language, c.updated_at, c.deleted_at, c.content_hash
              FROM caches c
              LEFT JOIN cache_tags ct ON c.id = ct.cache_id
              WHERE c.deleted_at = 0 AND (LOWER(c.content) LIKE ?1 ESCAPE '\\' OR LOWER(ct.tag) LIKE ?1 ESCAPE '\\')
@@ -579,6 +635,7 @@ impl Database {
                 html_content: row.get(3)?,
                 image_data_url: row.get(4)?,
                 image_hash: row.get(5)?,
+                content_hash: row.get(13)?,
                 created_at: row.get(6)?,
                 content_length: row.get(7)?,
                 tags: Vec::new(),
@@ -733,7 +790,7 @@ impl Database {
     pub fn get_deleted_caches(&self) -> SqlResult<Vec<CacheItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, cache_type, content, html_content, image_data_url, image_hash,
-                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at
+                    created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash
              FROM caches
              WHERE deleted_at != 0
              ORDER BY deleted_at DESC",
@@ -747,6 +804,7 @@ impl Database {
                 html_content: row.get(3)?,
                 image_data_url: row.get(4)?,
                 image_hash: row.get(5)?,
+                content_hash: row.get(13)?,
                 created_at: row.get(6)?,
                 content_length: row.get(7)?,
                 tags: Vec::new(),
@@ -819,6 +877,9 @@ impl Database {
                 }
                 if let Some(ref h) = c.image_hash {
                     obj["image_hash"] = serde_json::Value::String(h.clone());
+                }
+                if let Some(ref ch) = c.content_hash {
+                    obj["content_hash"] = serde_json::Value::String(ch.clone());
                 }
                 if let Some(ref l) = c.language {
                     obj["language"] = serde_json::Value::String(l.clone());
@@ -893,6 +954,21 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
         .and_then(|v| v.as_i64())
         .unwrap_or_else(chrono_now_ms);
 
+    let image_hash = rec
+        .get("image_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Parse content_hash or compute it if missing
+    let content_hash = rec
+        .get("content_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            let h = compute_content_hash(&cache_type, &content, image_hash.as_deref());
+            if h.is_empty() { None } else { Some(h) }
+        });
+
     CacheItem {
         id,
         cache_type: cache_type.clone(),
@@ -905,10 +981,8 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
             .get("image_data_url")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        image_hash: rec
-            .get("image_hash")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+        image_hash,
+        content_hash,
         created_at,
         content_length: rec
             .get("content_length")
@@ -943,11 +1017,30 @@ fn parse_import_record(rec: &serde_json::Value) -> CacheItem {
     }
 }
 
-/// generate_id creates a unique ID in format: timestamp_randomHex
+/// compute_content_hash calculates a short SHA-256 hash for content dedup.
+/// For text/html: first 16 hex chars (8 bytes) of SHA-256(type + "\0" + content).
+/// For image: reuses image_hash.
+pub fn compute_content_hash(cache_type: &str, content: &str, image_hash: Option<&str>) -> String {
+    if cache_type == "image" {
+        return image_hash.unwrap_or("").to_string();
+    }
+    if content.is_empty() {
+        return String::new();
+    }
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(cache_type.as_bytes());
+    hasher.update(b"\0");
+    hasher.update(content.as_bytes());
+    let result = hasher.finalize();
+    // Take first 8 bytes → 16 hex chars
+    hex::encode(&result[..8])
+}
+
+/// generate_id creates a random ID (10 hex chars = 5 bytes)
 pub fn generate_id() -> String {
-    let ts = chrono_now_ms();
-    let rand: u64 = rand_u64();
-    format!("{}_{:08x}", ts, rand & 0xFFFFFFFF)
+    let a = rand_u64();
+    format!("{:010x}", a & 0xFF_FFFFFFFF)
 }
 
 pub fn chrono_now_ms() -> i64 {

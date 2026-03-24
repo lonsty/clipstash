@@ -14,6 +14,7 @@ import {
   registerHotkey, setSuppressAutoHide,
   getAppVersion, updateTrayMenu, openUrl,
 } from '../../utils/bridge.js';
+import { refreshSyncState } from './sync-ui.js';
 
 // DOM references
 const btnSettings = document.getElementById('btn-settings');
@@ -91,6 +92,9 @@ export function initSettingsPanel(callbacks) {
     }
 
     settingsOverlay.style.display = 'flex';
+
+    // Reset sync password UI in case user left it in editing state
+    await refreshSyncState();
   });
 
   // Close settings

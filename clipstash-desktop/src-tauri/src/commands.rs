@@ -66,6 +66,11 @@ pub fn add_cache(
 ) -> Result<bool, String> {
     let ct = cache_type.clone();
     let now = created_at;
+    let content_hash = db::compute_content_hash(
+        &cache_type,
+        &content,
+        image_hash.as_deref(),
+    );
     let item = CacheItem {
         id,
         cache_type,
@@ -73,6 +78,7 @@ pub fn add_cache(
         html_content,
         image_data_url,
         image_hash,
+        content_hash: if content_hash.is_empty() { None } else { Some(content_hash) },
         created_at,
         content_length,
         tags,
@@ -500,12 +506,21 @@ pub async fn validate_sync_token(token: String) -> Result<String, String> {
 pub async fn init_cloud_sync(state: State<'_, AppState>, token: String) -> Result<SyncSettings, String> {
     let (gist_id, username) = sync::init_sync(&token).await?;
 
+    // Preserve existing sync_password and sync_images if reconnecting
+    let (existing_password, existing_sync_images) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let s = db.get_sync_settings();
+        (s.sync_password, s.sync_images)
+    };
+
     let settings = SyncSettings {
         token: token.clone(),
         gist_id: gist_id.clone(),
         enabled: true,
         last_sync_at: 0,
         auto_sync: true,
+        sync_password: existing_password,
+        sync_images: existing_sync_images,
     };
 
     {
@@ -521,8 +536,8 @@ pub async fn init_cloud_sync(state: State<'_, AppState>, token: String) -> Resul
 }
 
 #[tauri::command]
-pub async fn perform_cloud_sync(state: State<'_, AppState>) -> Result<SyncResult, String> {
-    let (token, gist_id, local_caches, pending_deleted, pending_restored) = {
+pub async fn perform_cloud_sync(state: State<'_, AppState>, force_push: bool) -> Result<SyncResult, String> {
+    let (token, gist_id, sync_password, sync_images, local_caches, pending_deleted, pending_restored) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
         let sync_settings = db.get_sync_settings();
         if !sync_settings.enabled || sync_settings.token.is_empty() || sync_settings.gist_id.is_empty() {
@@ -532,10 +547,10 @@ pub async fn perform_cloud_sync(state: State<'_, AppState>) -> Result<SyncResult
         let caches = db.get_all_caches_including_deleted().map_err(|e| e.to_string())?;
         let deleted = db.get_pending_deleted().map_err(|e| e.to_string())?;
         let restored = db.get_pending_restored().map_err(|e| e.to_string())?;
-        (sync_settings.token, sync_settings.gist_id, caches, deleted, restored)
+        (sync_settings.token, sync_settings.gist_id, sync_settings.sync_password, sync_settings.sync_images, caches, deleted, restored)
     };
 
-    let (result, merged_caches) = sync::perform_sync(&token, &gist_id, local_caches, pending_deleted, pending_restored).await?;
+    let (result, merged_caches) = sync::perform_sync(&token, &gist_id, &sync_password, sync_images, local_caches, pending_deleted, pending_restored, force_push).await?;
 
     // Apply merged records to local DB
     {

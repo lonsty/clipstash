@@ -3,15 +3,17 @@
 
 import { initLang, t, getLang } from '../utils/i18n.js';
 import {
-  searchCaches, getStorageStats, getDeletedCaches, purgeExpiredCaches,
+  addCache, searchCaches, getStorageStats, getDeletedCaches, purgeExpiredCaches,
   getTheme,
 } from '../utils/storage.js';
 import {
   debounce, applyI18n, createConfirmController, applyThemeToDocument,
+  getAdaptiveRefreshInterval,
 } from '../shared/dom-utils.js';
 import {
   PAGE_SIZE, SEARCH_DEBOUNCE_DELAY, FEEDBACK_DISPLAY_DURATION,
 } from '../utils/constants.js';
+import { formatRelativeTime } from '../utils/time.js';
 import { createCacheCard } from './modules/card-renderer.js';
 import { initModal, openModal, closeModal, isModalOpen } from './modules/modal-controller.js';
 import { initTrashPanel, updateTrashButton, isTrashOpen, closeTrash } from './modules/trash-panel.js';
@@ -24,6 +26,7 @@ let allFilteredCaches = [];
 let displayedCount = 0;
 let isLoadingMore = false;
 let currentQuery = '';
+let timeRefreshTimer = null;
 
 // ===== DOM References =====
 
@@ -63,6 +66,32 @@ async function refreshList() {
   await updateStats();
   updateEmptyStates();
   await updateTrashButton();
+
+  // Re-schedule adaptive time refresh (new cards may need faster updates)
+  scheduleTimeRefresh();
+}
+
+/**
+ * scheduleTimeRefresh adaptively refreshes all [data-relative-time] elements.
+ * Cancels any pending timer and re-schedules based on the newest visible timestamp.
+ * The newest card changes fastest, so it drives the refresh frequency.
+ * Interval decreases as content ages: 5s → 30s → 5min → 1h → stop (≥ 30d).
+ */
+function scheduleTimeRefresh() {
+  clearTimeout(timeRefreshTimer);
+  const els = document.querySelectorAll('[data-relative-time]');
+  let newest = 0;
+  els.forEach((el) => {
+    const ts = Number(el.dataset.relativeTime);
+    if (ts > 0) {
+      el.textContent = formatRelativeTime(ts);
+      if (ts > newest) newest = ts;
+    }
+  });
+  const interval = getAdaptiveRefreshInterval(newest);
+  if (interval > 0) {
+    timeRefreshTimer = setTimeout(scheduleTimeRefresh, interval);
+  }
 }
 
 function appendNextPage() {
@@ -149,6 +178,77 @@ const handleSearch = debounce(async (query) => {
   await refreshList();
 }, SEARCH_DEBOUNCE_DELAY);
 
+// ===== Clipboard Read (directly in popup for image support) =====
+
+/**
+ * readClipboardInPopup reads clipboard content using the Clipboard API.
+ * Popup has focus so navigator.clipboard.read() can access images.
+ * Returns { type, content, htmlContent?, imageDataUrl?, imageHash? } or null.
+ */
+async function readClipboardInPopup() {
+  try {
+    const items = await navigator.clipboard.read();
+    if (!items || items.length === 0) return null;
+
+    const item = items[0];
+    const types = item.types;
+
+    // Check for image
+    const imageType = types.find(t => t.startsWith('image/'));
+    if (imageType) {
+      const blob = await item.getType(imageType);
+      const arrayBuffer = await blob.arrayBuffer();
+      // Compute SHA-256 hash for dedup
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const imageHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      // Convert to data URL for display
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      return { type: 'image', content: '', imageDataUrl: dataUrl, imageHash };
+    }
+
+    // Check for HTML
+    if (types.includes('text/html')) {
+      const htmlBlob = await item.getType('text/html');
+      const htmlContent = await htmlBlob.text();
+      let textContent = '';
+      if (types.includes('text/plain')) {
+        const textBlob = await item.getType('text/plain');
+        textContent = await textBlob.text();
+      }
+      if (htmlContent && htmlContent.trim()) {
+        return {
+          type: 'html',
+          content: textContent || htmlContent.replace(/<[^>]+>/g, ''),
+          htmlContent,
+        };
+      }
+    }
+
+    // Fallback to plain text
+    if (types.includes('text/plain')) {
+      const textBlob = await item.getType('text/plain');
+      const text = await textBlob.text();
+      if (text) return { type: 'text', content: text };
+    }
+
+    return null;
+  } catch {
+    // Fallback to readText (no image support)
+    try {
+      const text = await navigator.clipboard.readText();
+      return text ? { type: 'text', content: text } : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 // ===== Cache Now =====
 
 let cacheNowFeedbackTimer = null;
@@ -187,27 +287,25 @@ btnSearchClear.addEventListener('click', () => {
   searchInput.focus();
 });
 
-// Cache Now
+// Cache Now — read clipboard directly in popup (supports images)
 btnCacheNow.addEventListener('click', async () => {
   btnCacheNow.disabled = true;
   btnCacheNow.classList.add('caching');
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'cache-clipboard-from-popup' });
-    const status = response?.status || 'empty';
-    let feedbackText = '';
-    let feedbackClass = '';
-    if (status === 'added') {
-      feedbackText = t('cacheSuccess');
-      feedbackClass = 'cache-feedback-success';
-      await refreshList();
-    } else if (status === 'duplicate') {
-      feedbackText = t('cacheDuplicate');
-      feedbackClass = 'cache-feedback-warn';
+    const clipData = await readClipboardInPopup();
+    if (!clipData) {
+      showCacheNowFeedback(t('cacheEmpty'), 'cache-feedback-muted');
     } else {
-      feedbackText = t('cacheEmpty');
-      feedbackClass = 'cache-feedback-muted';
+      const result = await addCache(clipData);
+      if (result.added) {
+        showCacheNowFeedback(t('cacheSuccess'), 'cache-feedback-success');
+        await refreshList();
+      } else if (result.duplicate) {
+        showCacheNowFeedback(t('cacheDuplicate'), 'cache-feedback-warn');
+      } else {
+        showCacheNowFeedback(t('cacheEmpty'), 'cache-feedback-muted');
+      }
     }
-    showCacheNowFeedback(feedbackText, feedbackClass);
   } catch {
     showCacheNowFeedback(t('cacheEmpty'), 'cache-feedback-muted');
   }
@@ -283,6 +381,9 @@ async function init() {
   // Setup scroll and render
   setupScrollLoading();
   await refreshList();
+
+  // Kick off adaptive relative-time refresh
+  scheduleTimeRefresh();
 }
 
 init();

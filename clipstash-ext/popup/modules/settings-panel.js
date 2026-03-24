@@ -7,6 +7,7 @@ import {
   exportCaches, importCaches, clearAllCaches, deleteAllPermanently,
 } from '../../utils/storage.js';
 import { FEEDBACK_DISPLAY_DURATION } from '../../utils/constants.js';
+import { refreshSyncState } from './sync-ui.js';
 
 // DOM references
 const btnSettings = document.getElementById('btn-settings');
@@ -63,6 +64,9 @@ export function initSettingsPanel(callbacks) {
     appVersionEl.textContent = `v${manifest.version}`;
 
     settingsOverlay.style.display = 'flex';
+
+    // Reset sync password UI in case user left it in editing state
+    await refreshSyncState();
   });
 
   // Close settings

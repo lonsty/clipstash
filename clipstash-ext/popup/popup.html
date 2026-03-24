@@ -357,6 +357,31 @@
             <span data-i18n="settingAutoSyncDesc"></span>
           </label>
         </div>
+        <!-- Sync Images -->
+        <div class="settings-item settings-item--sync-images">
+          <label class="settings-toggle settings-toggle--sync-images" id="sync-images-toggle-wrap">
+            <input type="checkbox" id="toggle-sync-images" disabled>
+            <span data-i18n="settingSyncImagesDesc"></span>
+          </label>
+        </div>
+        <!-- Sync Password (Encryption) -->
+        <div class="settings-item settings-item--sync-password">
+          <label class="settings-label" data-i18n="syncPassword"></label>
+          <div class="settings-desc" data-i18n="syncPasswordDesc"></div>
+          <div id="sync-password-form" class="sync-password-form">
+            <div id="sync-encryption-status" class="sync-encryption-status"></div>
+            <div class="sync-password-fields">
+              <input id="sync-password-input" type="password" class="settings-input sync-password-input" data-i18n-placeholder="syncPasswordPlaceholder" autocomplete="off">
+              <input id="sync-password-confirm" type="password" class="settings-input sync-password-input" data-i18n-placeholder="syncPasswordConfirm" autocomplete="off" style="display: none;">
+            </div>
+            <div class="sync-password-hint" data-i18n="syncPasswordHint"></div>
+            <div id="sync-password-status" class="sync-password-status" style="display: none;"></div>
+            <div class="sync-password-actions">
+              <button id="btn-sync-password-save" class="btn btn-primary btn-sm" data-i18n="syncPasswordSet"></button>
+              <button id="btn-sync-password-remove" class="btn btn-ghost btn-sm" style="display: none;" data-i18n="syncPasswordRemove"></button>
+            </div>
+          </div>
+        </div>
         <!-- Data Management -->
         <div class="settings-item">
           <label class="settings-label" data-i18n="settingData"></label>

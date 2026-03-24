@@ -103,6 +103,7 @@ label,
 .settings-label,
 .stats-bar,
 .header {
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -194,6 +195,8 @@ body {
   cursor: pointer;
   transition: all var(--transition);
   white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .btn-sm {
@@ -230,9 +233,15 @@ body {
 }
 
 .btn:disabled {
-  opacity: 0.4;
+  opacity: .4;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+.btn *,
+.btn:disabled * {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .btn-icon {
@@ -1448,6 +1457,16 @@ body {
   justify-content: flex-end;
 }
 
+/* Shortcut & recording buttons — match standard settings button size */
+.settings-shortcut-info .btn,
+.shortcut-recording-actions .btn {
+  height: 24px;
+  min-width: 64px;
+  justify-content: center;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 /* Desktop-specific: Toggle settings */
 .settings-toggles {
   display: flex;
@@ -1651,6 +1670,85 @@ body {
   opacity: .4;
 }
 
+.settings-item--sync-images.is-disabled {
+  opacity: .5;
+  pointer-events: none;
+}
+
+.settings-item--sync-images .settings-toggle input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: .4;
+}
+
+/* Sync Password */
+.settings-item--sync-password.is-disabled {
+  opacity: .5;
+  pointer-events: none;
+}
+
+.sync-password-form {
+  margin-top: 6px;
+}
+
+.sync-password-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sync-password-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sync-password-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.sync-password-actions .btn {
+  height: 24px;
+  min-width: 64px;
+  justify-content: center;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.sync-password-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.sync-password-status {
+  font-size: 11px;
+  padding: 2px 0;
+  margin-top: 2px;
+}
+
+.sync-password-status.success {
+  color: var(--success);
+}
+
+.sync-password-status.error {
+  color: var(--danger);
+}
+
+.sync-encryption-status {
+  font-size: 11px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.sync-encryption-status.encryption-on {
+  color: var(--success);
+}
+
+.sync-encryption-status.encryption-off {
+  color: var(--text-muted);
+}
+
 .sync-actions-row {
   display: flex;
   gap: 6px;
@@ -1667,8 +1765,12 @@ body {
 
 .sync-result {
   font-size: 11px;
-  padding: 4px 0;
+  padding-top: 4px;
   margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .sync-result.success {
@@ -1677,6 +1779,16 @@ body {
 
 .sync-result.error {
   color: var(--danger);
+}
+
+.sync-force-push-btn {
+  height: 24px;
+  min-width: 64px;
+  justify-content: center;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Danger Zone in Settings */

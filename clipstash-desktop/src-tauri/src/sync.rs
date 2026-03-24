@@ -1,5 +1,6 @@
 // ClipStash Desktop - Cloud sync module (GitHub Gist backend)
 
+use crate::crypto;
 use crate::db::{self, CacheItem, Database};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde::{Deserialize, Serialize};
@@ -7,11 +8,21 @@ use std::collections::HashMap;
 
 const GIST_DATA_FILE: &str = "clipstash-data.json";
 const GIST_META_FILE: &str = "clipstash-meta.json";
+const GIST_IMAGE_PREFIX: &str = "clipstash-img-";
 const GIST_DESCRIPTION: &str = "ClipStash Cloud Sync Data (do not delete)";
 const API_BASE: &str = "https://api.github.com";
 
+/// Data format version — v2 uses base64(encrypt(gzip(json)))
+const SYNC_DATA_V2: i32 = 2;
+
 /// 30 days in milliseconds — entries older than this are pruned from deleted_ids.
 const DELETED_IDS_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
+/// 5 MB per image (original data URL size)
+const SYNC_IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+/// 50 MB total image sync quota
+const SYNC_IMAGE_TOTAL_MAX_BYTES: usize = 50 * 1024 * 1024;
 
 // ===== Deleted Entry =====
 
@@ -35,6 +46,10 @@ pub struct SyncSettings {
     pub last_sync_at: i64,
     #[serde(rename = "autoSync", default = "default_auto_sync")]
     pub auto_sync: bool,
+    #[serde(rename = "syncPassword", default)]
+    pub sync_password: String,
+    #[serde(rename = "syncImages", default)]
+    pub sync_images: bool,
 }
 
 fn default_auto_sync() -> bool {
@@ -49,11 +64,20 @@ impl Default for SyncSettings {
             enabled: false,
             last_sync_at: 0,
             auto_sync: true,
+            sync_password: String::new(),
+            sync_images: false,
         }
     }
 }
 
 // ===== Sync Metadata =====
+
+/// ImageIndexEntry tracks an uploaded image in the Gist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ImageIndexEntry {
+    uploaded_at: i64,
+    size: usize,
+}
 
 /// SyncMeta is stored in the Gist's meta file to track sync state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,6 +86,8 @@ struct SyncMeta {
     last_sync_at: i64,
     record_count: usize,
     deleted_ids: Vec<DeletedEntry>,
+    #[serde(default)]
+    image_index: HashMap<String, ImageIndexEntry>,
 }
 
 // ===== Remote Data Format =====
@@ -180,15 +206,16 @@ async fn create_gist(
     headers: &HeaderMap,
 ) -> Result<String, String> {
     let empty_data = RemoteData {
-        version: 1,
+        version: SYNC_DATA_V2,
         app: "ClipStash".to_string(),
         records: Vec::new(),
     };
     let empty_meta = SyncMeta {
-        version: 1,
+        version: SYNC_DATA_V2,
         last_sync_at: 0,
         record_count: 0,
         deleted_ids: Vec::new(),
+        image_index: HashMap::new(),
     };
 
     let body = serde_json::json!({
@@ -196,10 +223,10 @@ async fn create_gist(
         "public": false,
         "files": {
             GIST_DATA_FILE: {
-                "content": serde_json::to_string_pretty(&empty_data).unwrap_or_default()
+                "content": serde_json::to_string(&empty_data).unwrap_or_default()
             },
             GIST_META_FILE: {
-                "content": serde_json::to_string_pretty(&empty_meta).unwrap_or_default()
+                "content": serde_json::to_string(&empty_meta).unwrap_or_default()
             }
         }
     });
@@ -231,6 +258,7 @@ async fn create_gist(
 }
 
 /// get_gist_files fetches the content of a gist's files.
+/// For truncated files (>1 MB), fetches full content via raw_url.
 async fn get_gist_files(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -259,7 +287,40 @@ async fn get_gist_files(
     let mut files = HashMap::new();
     if let Some(file_map) = body.get("files").and_then(|v| v.as_object()) {
         for (name, file_obj) in file_map {
-            if let Some(content) = file_obj.get("content").and_then(|v| v.as_str()) {
+            let truncated = file_obj
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            if truncated {
+                // File exceeds ~1 MB — fetch full content via raw_url.
+                // No Authorization header needed: the URL contains an embedded token.
+                if let Some(raw_url) = file_obj.get("raw_url").and_then(|v| v.as_str()) {
+                    match client
+                        .get(raw_url)
+                        .send()
+                        .await
+                    {
+                        Ok(raw_resp) if raw_resp.status().is_success() => {
+                            if let Ok(raw_text) = raw_resp.text().await {
+                                files.insert(name.clone(), raw_text);
+                            } else {
+                                log::warn!("Failed to read raw content for truncated file: {}", name);
+                            }
+                        }
+                        Ok(raw_resp) => {
+                            log::warn!(
+                                "Failed to fetch raw_url for {}: HTTP {}",
+                                name,
+                                raw_resp.status()
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!("Network error fetching raw_url for {}: {}", name, e);
+                        }
+                    }
+                }
+            } else if let Some(content) = file_obj.get("content").and_then(|v| v.as_str()) {
                 files.insert(name.clone(), content.to_string());
             }
         }
@@ -268,20 +329,30 @@ async fn get_gist_files(
     Ok(files)
 }
 
-/// update_gist updates the content of a gist's files.
-async fn update_gist(
+/// update_gist_files updates one or more gist files.
+/// Pass None as content to delete a file.
+async fn update_gist_files(
     client: &reqwest::Client,
     headers: &HeaderMap,
     gist_id: &str,
-    data_content: &str,
-    meta_content: &str,
+    files_map: &HashMap<String, Option<String>>,
 ) -> Result<(), String> {
-    let body = serde_json::json!({
-        "files": {
-            GIST_DATA_FILE: { "content": data_content },
-            GIST_META_FILE: { "content": meta_content }
+    let mut files = serde_json::Map::new();
+    for (name, content) in files_map {
+        match content {
+            Some(c) => {
+                files.insert(
+                    name.clone(),
+                    serde_json::json!({ "content": c }),
+                );
+            }
+            None => {
+                files.insert(name.clone(), serde_json::Value::Null);
+            }
         }
-    });
+    }
+
+    let body = serde_json::json!({ "files": files });
 
     let resp = client
         .patch(format!("{}/gists/{}", API_BASE, gist_id))
@@ -300,43 +371,94 @@ async fn update_gist(
     Ok(())
 }
 
+/// build_image_file_name returns the Gist filename for a given image hash.
+fn build_image_file_name(image_hash: &str) -> String {
+    format!("{}{}.json", GIST_IMAGE_PREFIX, image_hash)
+}
+
+// ===== V2 Data Format Helpers =====
+
+/// parse_gist_content auto-detects v1 (plain JSON) vs v2 (encrypted+gzip) format.
+/// v2 content is NOT valid JSON — it's a base64 string of encrypt(gzip(json)).
+fn parse_gist_content(content: &str, sync_password: &str) -> Result<serde_json::Value, String> {
+    // Try JSON parse first (v1 plain JSON)
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+        if parsed.is_object() || parsed.is_array() {
+            return Ok(parsed);
+        }
+    }
+
+    // v2: base64(encrypt(gzip(json))) — requires sync password
+    if sync_password.is_empty() {
+        return Err("syncPasswordRequired".to_string());
+    }
+
+    let json_str = crypto::unpack_sync_data(content, sync_password)?;
+    serde_json::from_str(&json_str).map_err(|e| format!("JSON parse error after decrypt: {}", e))
+}
+
+/// serialize_gist_content serializes data for upload.
+/// If sync_password is set, uses v2 format: base64(encrypt(gzip(json))).
+/// If no password, uses v1 plain JSON for backward compatibility.
+fn serialize_gist_content(
+    data: &serde_json::Value,
+    sync_password: &str,
+) -> Result<String, String> {
+    let json_str =
+        serde_json::to_string(data).map_err(|e| format!("Serialize error: {}", e))?;
+
+    if sync_password.is_empty() {
+        return Ok(json_str);
+    }
+
+    crypto::pack_sync_data(&json_str, sync_password)
+}
+
 // ===== Record Conversion =====
 
 /// record_to_json converts a CacheItem to the export/sync JSON format (snake_case).
+/// Omits content_length (receiver recomputes it), and conditionally omits
+/// empty/default fields to reduce Gist payload size.
+/// For image records, includes image_hash but NOT image_data_url (stored separately).
 fn record_to_json(item: &CacheItem) -> serde_json::Value {
     let mut obj = serde_json::json!({
         "id": item.id,
         "type": item.cache_type,
         "content": item.content,
         "created_at": item.created_at,
-        "content_length": item.content_length,
-        "tags": item.tags,
-        "pinned": item.pinned,
-        "pinned_at": item.pinned_at.unwrap_or(0),
         "updated_at": item.updated_at,
     });
+    if let Some(ref ch) = item.content_hash {
+        obj["content_hash"] = serde_json::Value::String(ch.clone());
+    }
+    if !item.tags.is_empty() {
+        obj["tags"] = serde_json::json!(item.tags);
+    }
+    if item.pinned {
+        obj["pinned"] = serde_json::Value::Bool(true);
+        obj["pinned_at"] = serde_json::json!(item.pinned_at.unwrap_or(0));
+    }
     if let Some(ref h) = item.html_content {
         obj["html_content"] = serde_json::Value::String(h.clone());
     }
     if let Some(ref l) = item.language {
         obj["language"] = serde_json::Value::String(l.clone());
     }
-    // MVP: skip image fields (image records not synced)
+    // For image records: include image_hash reference (data stored in separate Gist files)
+    if let Some(ref ih) = item.image_hash {
+        obj["image_hash"] = serde_json::Value::String(ih.clone());
+    }
     obj
 }
 
 /// json_to_record parses a sync JSON record back into a CacheItem.
+/// Image records are now included (with image_hash only; image_data_url is pulled separately).
 fn json_to_record(rec: &serde_json::Value) -> Option<CacheItem> {
     let id = rec.get("id").and_then(|v| v.as_str())?;
     let cache_type = rec
         .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("text");
-
-    // MVP: skip image records
-    if cache_type == "image" {
-        return None;
-    }
 
     let content = rec
         .get("content")
@@ -351,6 +473,25 @@ fn json_to_record(rec: &serde_json::Value) -> Option<CacheItem> {
         .and_then(|v| v.as_i64())
         .unwrap_or(created_at);
 
+    // Parse content_hash; compute if missing (backward compat with v1 data, skip for images)
+    let content_hash = rec
+        .get("content_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            if cache_type == "image" {
+                return None;
+            }
+            let h = db::compute_content_hash(cache_type, content, None);
+            if h.is_empty() { None } else { Some(h) }
+        });
+
+    // Parse image_hash for image records
+    let image_hash = rec
+        .get("image_hash")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
     Some(CacheItem {
         id: id.to_string(),
         cache_type: cache_type.to_string(),
@@ -359,9 +500,11 @@ fn json_to_record(rec: &serde_json::Value) -> Option<CacheItem> {
             .get("html_content")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        image_data_url: None,
-        image_hash: None,
+        image_data_url: None, // Image data pulled separately from image files
+        image_hash,
+        content_hash,
         created_at,
+        // Recompute content_length locally (field removed from sync payload)
         content_length: rec
             .get("content_length")
             .and_then(|v| v.as_i64())
@@ -392,81 +535,169 @@ fn json_to_record(rec: &serde_json::Value) -> Option<CacheItem> {
 // ===== Merge Logic (Last-Write-Wins) =====
 
 /// merge_records performs LWW merge between local and remote records.
+/// Matching order: 1) by ID  2) by content_hash/image_hash (cross-device dedup)  3) new record.
 /// Records present in local_deleted_ids are treated as intentionally deleted
 /// and will NOT be pulled back from remote.
-/// Returns the merged record list.
+/// When sync_images is true, image records are included (matched by image_hash).
+/// Returns (merged_list, pulled, pushed, merged_conflicts, local_updated, deduplicated, loser_ids).
 fn merge_records(
     local: &[CacheItem],
     remote: &[serde_json::Value],
     local_deleted_ids: &std::collections::HashSet<String>,
-) -> (Vec<CacheItem>, i32, i32, i32, i32) {
+    sync_images: bool,
+) -> (Vec<CacheItem>, i32, i32, i32, i32, i32, Vec<String>) {
     let mut local_map: HashMap<String, CacheItem> = HashMap::new();
+    let mut local_hash_map: HashMap<String, String> = HashMap::new(); // content_hash → id
+    let mut local_image_hash_map: HashMap<String, String> = HashMap::new(); // image_hash → id
     for item in local {
-        // MVP: skip image records
-        if item.cache_type == "image" {
+        if !sync_images && item.cache_type == "image" {
             continue;
         }
-        // Skip soft-deleted local records — they shouldn't participate in merge
         if item.deleted_at != 0 {
             continue;
         }
         local_map.insert(item.id.clone(), item.clone());
+        if item.cache_type != "image" {
+            if let Some(ref ch) = item.content_hash {
+                if !ch.is_empty() {
+                    local_hash_map.insert(ch.clone(), item.id.clone());
+                }
+            }
+        }
+        if item.cache_type == "image" {
+            if let Some(ref ih) = item.image_hash {
+                if !ih.is_empty() {
+                    local_image_hash_map.insert(ih.clone(), item.id.clone());
+                }
+            }
+        }
     }
 
     let mut pulled = 0i32;
     let mut merged = 0i32;
     let mut local_updated = 0i32;
+    let mut deduplicated = 0i32;
+    let mut loser_ids: Vec<String> = Vec::new();
 
     // Build remote lookup
     let mut remote_map: HashMap<String, CacheItem> = HashMap::new();
     for rec_json in remote {
         if let Some(remote_item) = json_to_record(rec_json) {
+            if !sync_images && remote_item.cache_type == "image" {
+                continue;
+            }
             remote_map.insert(remote_item.id.clone(), remote_item);
         }
     }
 
     // Process remote records
     for (_, remote_item) in &remote_map {
-        // Skip records that were intentionally deleted locally
         if local_deleted_ids.contains(&remote_item.id) {
             continue;
         }
 
         if let Some(local_item) = local_map.get(&remote_item.id) {
-            // Both sides have this record — LWW
+            // 1) ID match → LWW
             if remote_item.updated_at > local_item.updated_at {
                 local_map.insert(remote_item.id.clone(), remote_item.clone());
                 merged += 1;
             } else if local_item.updated_at > remote_item.updated_at {
-                // Local wins — record has been modified locally (e.g. tags, language)
                 local_updated += 1;
             }
+        } else if remote_item.cache_type == "image" {
+            // Image dedup by image_hash
+            if let Some(ref remote_ih) = remote_item.image_hash {
+                if !remote_ih.is_empty() {
+                    if let Some(local_id) = local_image_hash_map.get(remote_ih) {
+                        let local_id = local_id.clone();
+                        if let Some(local_item) = local_map.get(&local_id) {
+                            if remote_item.updated_at > local_item.updated_at {
+                                local_map.remove(&local_id);
+                                local_map.insert(remote_item.id.clone(), remote_item.clone());
+                                loser_ids.push(local_id);
+                            } else {
+                                loser_ids.push(remote_item.id.clone());
+                            }
+                            deduplicated += 1;
+                        } else {
+                            local_map.insert(remote_item.id.clone(), remote_item.clone());
+                            pulled += 1;
+                        }
+                    } else {
+                        local_map.insert(remote_item.id.clone(), remote_item.clone());
+                        pulled += 1;
+                    }
+                } else {
+                    local_map.insert(remote_item.id.clone(), remote_item.clone());
+                    pulled += 1;
+                }
+            } else {
+                local_map.insert(remote_item.id.clone(), remote_item.clone());
+                pulled += 1;
+            }
+        } else if let Some(ref remote_hash) = remote_item.content_hash {
+            if !remote_hash.is_empty() {
+                if let Some(local_id) = local_hash_map.get(remote_hash) {
+                    // 2) contentHash match → same content on different devices
+                    let local_id = local_id.clone();
+                    if let Some(local_item) = local_map.get(&local_id) {
+                        if remote_item.updated_at > local_item.updated_at {
+                            // Remote wins
+                            local_map.remove(&local_id);
+                            local_map.insert(remote_item.id.clone(), remote_item.clone());
+                            loser_ids.push(local_id);
+                        } else {
+                            // Local wins
+                            loser_ids.push(remote_item.id.clone());
+                        }
+                        deduplicated += 1;
+                    } else {
+                        // local_id was already removed, treat as new
+                        local_map.insert(remote_item.id.clone(), remote_item.clone());
+                        pulled += 1;
+                    }
+                } else {
+                    // No hash match → new record
+                    local_map.insert(remote_item.id.clone(), remote_item.clone());
+                    pulled += 1;
+                }
+            } else {
+                // Empty hash → new record
+                local_map.insert(remote_item.id.clone(), remote_item.clone());
+                pulled += 1;
+            }
         } else {
-            // Remote-only record — pull in
+            // 3) No hash → new record
             local_map.insert(remote_item.id.clone(), remote_item.clone());
             pulled += 1;
         }
     }
 
-    // Count local-only records that will be pushed (not present in remote at all)
+    // Count local-only records that will be pushed
+    let loser_set: std::collections::HashSet<&str> =
+        loser_ids.iter().map(|s| s.as_str()).collect();
     let pushed = local
         .iter()
         .filter(|item| {
-            item.cache_type != "image"
-                && item.deleted_at == 0
+            if !sync_images && item.cache_type == "image" {
+                return false;
+            }
+            item.deleted_at == 0
                 && !remote_map.contains_key(&item.id)
+                && !loser_set.contains(item.id.as_str())
         })
         .count() as i32;
 
     let merged_list: Vec<CacheItem> = local_map.into_values().collect();
 
-    (merged_list, pulled, pushed, merged, local_updated)
+    (merged_list, pulled, pushed, merged, local_updated, deduplicated, loser_ids)
 }
 
 // ===== Sync Settings Persistence =====
 
 impl Database {
     /// get_sync_settings retrieves cloud sync settings from the settings table.
+    /// Decrypts the token if it was stored encrypted (prefixed with "enc:").
     pub fn get_sync_settings(&self) -> SyncSettings {
         let mut settings = SyncSettings::default();
 
@@ -476,6 +707,8 @@ impl Database {
             "sync_enabled",
             "sync_last_sync_at",
             "sync_auto_sync",
+            "sync_password",
+            "sync_images",
         ];
 
         for key in &pairs {
@@ -496,7 +729,20 @@ impl Database {
                         settings.last_sync_at = val.parse().unwrap_or(0);
                     }
                     "sync_auto_sync" => settings.auto_sync = val == "true",
+                    "sync_password" => settings.sync_password = val,
+                    "sync_images" => settings.sync_images = val == "true",
                     _ => {}
+                }
+            }
+        }
+
+        // Decrypt token if stored encrypted
+        if settings.token.starts_with("enc:") {
+            match crypto::decrypt_token(&settings.token[4..], &settings.sync_password) {
+                Ok(plain) => settings.token = plain,
+                Err(e) => {
+                    log::warn!("Failed to decrypt stored sync token: {}", e);
+                    // Keep the encrypted form so it's not lost
                 }
             }
         }
@@ -505,13 +751,29 @@ impl Database {
     }
 
     /// save_sync_settings persists cloud sync settings.
+    /// Encrypts the token before storage for security.
     pub fn save_sync_settings(&self, settings: &SyncSettings) -> rusqlite::Result<()> {
+        // Encrypt token before storing (skip if already encrypted or empty)
+        let stored_token = if !settings.token.is_empty() && !settings.token.starts_with("enc:") {
+            match crypto::encrypt_token(&settings.token, &settings.sync_password) {
+                Ok(encrypted) => format!("enc:{}", encrypted),
+                Err(e) => {
+                    log::warn!("Failed to encrypt sync token: {}", e);
+                    settings.token.clone()
+                }
+            }
+        } else {
+            settings.token.clone()
+        };
+
         let pairs = [
-            ("sync_token", settings.token.clone()),
+            ("sync_token", stored_token),
             ("sync_gist_id", settings.gist_id.clone()),
             ("sync_enabled", settings.enabled.to_string()),
             ("sync_last_sync_at", settings.last_sync_at.to_string()),
             ("sync_auto_sync", settings.auto_sync.to_string()),
+            ("sync_password", settings.sync_password.clone()),
+            ("sync_images", settings.sync_images.to_string()),
         ];
 
         for (key, value) in &pairs {
@@ -528,8 +790,8 @@ impl Database {
     pub fn upsert_cache(&self, item: &CacheItem) -> rusqlite::Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO caches (id, cache_type, content, html_content, image_data_url, image_hash,
-                                            created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                            created_at, content_length, pinned, pinned_at, language, updated_at, deleted_at, content_hash)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             rusqlite::params![
                 item.id,
                 item.cache_type,
@@ -544,6 +806,7 @@ impl Database {
                 item.language,
                 item.updated_at,
                 item.deleted_at,
+                item.content_hash,
             ],
         )?;
 
@@ -590,51 +853,104 @@ pub async fn init_sync(token: &str) -> Result<(String, String), String> {
 }
 
 /// perform_sync executes a full sync cycle: pull → merge → push.
+/// `sync_password` is the user's sync password (empty = no encryption).
+/// `sync_images` enables image cloud sync.
 /// `local_pending_deleted` contains IDs deleted locally since last sync.
-/// `local_pending_restored` contains IDs restored locally since last sync;
-/// these IDs will be excluded from remote deleted_ids application and
-/// removed from the cloud deleted_ids list.
+/// `local_pending_restored` contains IDs restored locally since last sync.
+/// `force_push` skips remote data pull and pushes local data directly (password recovery).
 pub async fn perform_sync(
     token: &str,
     gist_id: &str,
+    sync_password: &str,
+    sync_images: bool,
     local_caches: Vec<CacheItem>,
     local_pending_deleted: Vec<(String, i64)>,
     local_pending_restored: Vec<String>,
+    force_push: bool,
 ) -> Result<(SyncResult, Vec<CacheItem>), String> {
     let client = reqwest::Client::new();
     let headers = build_headers(token)?;
 
-    // 1. Pull: fetch remote data
-    let files = get_gist_files(&client, &headers, gist_id).await?;
+    // 1. Pull: fetch remote data (auto-detects v1 JSON vs v2 encrypted)
+    // In force_push mode, skip remote data — we'll overwrite everything
+    let files: HashMap<String, String> = if force_push {
+        HashMap::new()
+    } else {
+        get_gist_files(&client, &headers, gist_id).await?
+    };
 
-    let remote_data: RemoteData = if let Some(data_str) = files.get(GIST_DATA_FILE) {
-        serde_json::from_str(data_str).unwrap_or(RemoteData {
-            version: 1,
-            app: "ClipStash".to_string(),
-            records: Vec::new(),
-        })
+    let remote_data: RemoteData = if !force_push {
+        if let Some(data_str) = files.get(GIST_DATA_FILE) {
+            match parse_gist_content(data_str, sync_password) {
+                Ok(val) => serde_json::from_value(val).unwrap_or(RemoteData {
+                    version: SYNC_DATA_V2,
+                    app: "ClipStash".to_string(),
+                    records: Vec::new(),
+                }),
+                Err(e) => {
+                    if !sync_password.is_empty() {
+                        return Err("syncPasswordWrong".to_string());
+                    }
+                    log::warn!("Failed to parse remote data (no password set): {}", e);
+                    RemoteData {
+                        version: SYNC_DATA_V2,
+                        app: "ClipStash".to_string(),
+                        records: Vec::new(),
+                    }
+                }
+            }
+        } else {
+            RemoteData {
+                version: SYNC_DATA_V2,
+                app: "ClipStash".to_string(),
+                records: Vec::new(),
+            }
+        }
     } else {
         RemoteData {
-            version: 1,
+            version: SYNC_DATA_V2,
             app: "ClipStash".to_string(),
             records: Vec::new(),
         }
     };
 
-    // Parse remote meta (for deleted_ids from other devices)
-    let remote_meta: SyncMeta = if let Some(meta_str) = files.get(GIST_META_FILE) {
-        serde_json::from_str(meta_str).unwrap_or(SyncMeta {
-            version: 1,
-            last_sync_at: 0,
-            record_count: 0,
-            deleted_ids: Vec::new(),
-        })
+    // Parse remote meta (for deleted_ids and image_index from other devices)
+    let remote_meta: SyncMeta = if !force_push {
+        if let Some(meta_str) = files.get(GIST_META_FILE) {
+            match parse_gist_content(meta_str, sync_password) {
+                Ok(val) => serde_json::from_value(val).unwrap_or(SyncMeta {
+                    version: SYNC_DATA_V2,
+                    last_sync_at: 0,
+                    record_count: 0,
+                    deleted_ids: Vec::new(),
+                    image_index: HashMap::new(),
+                }),
+                Err(_) => {
+                    SyncMeta {
+                        version: SYNC_DATA_V2,
+                        last_sync_at: 0,
+                        record_count: 0,
+                        deleted_ids: Vec::new(),
+                        image_index: HashMap::new(),
+                    }
+                }
+            }
+        } else {
+            SyncMeta {
+                version: SYNC_DATA_V2,
+                last_sync_at: 0,
+                record_count: 0,
+                deleted_ids: Vec::new(),
+                image_index: HashMap::new(),
+            }
+        }
     } else {
         SyncMeta {
-            version: 1,
+            version: SYNC_DATA_V2,
             last_sync_at: 0,
             record_count: 0,
             deleted_ids: Vec::new(),
+            image_index: HashMap::new(),
         }
     };
 
@@ -649,12 +965,10 @@ pub async fn perform_sync(
         local_pending_restored.into_iter().collect();
 
     // 2. Merge: LWW merge (respects local deletions)
-    let (mut merged_list, pulled, pushed, merged, local_updated) =
-        merge_records(&local_caches, &remote_data.records, &local_deleted_ids);
+    let (mut merged_list, pulled, pushed, merged, local_updated, deduplicated, loser_ids) =
+        merge_records(&local_caches, &remote_data.records, &local_deleted_ids, sync_images);
 
-    // 3. Apply remote deleted_ids: remove records that were deleted on another device
-    //    IMPORTANT: Skip IDs that were restored locally — the user intentionally
-    //    restored them, so we must NOT re-apply the cloud deletion.
+    // 3. Apply remote deleted_ids
     let now = db::chrono_now_ms();
     let remote_deleted_id_set: std::collections::HashSet<&str> = remote_meta
         .deleted_ids
@@ -663,7 +977,6 @@ pub async fn perform_sync(
         .collect();
     let before_count = merged_list.len();
     merged_list.retain(|item| {
-        // If locally restored, keep regardless of remote deleted_ids
         if local_restored_ids.contains(&item.id) {
             return true;
         }
@@ -671,8 +984,102 @@ pub async fn perform_sync(
     });
     let deleted_count = before_count - merged_list.len();
 
-    // 4. Combine deleted_ids: merge remote + local pending, dedup by id (keep latest)
-    //    Also remove any IDs that were restored locally.
+    // 4. Image sync: on-demand pull + incremental push
+    let mut image_files_to_upload: HashMap<String, Option<String>> = HashMap::new();
+    let mut new_image_index = remote_meta.image_index.clone();
+    let mut image_pulled = 0i32;
+
+    if sync_images {
+        // Collect all active image records
+        let active_image_hashes: std::collections::HashSet<String> = merged_list
+            .iter()
+            .filter(|item| item.cache_type == "image" && item.deleted_at == 0)
+            .filter_map(|item| item.image_hash.clone())
+            .collect();
+
+        for item in &mut merged_list {
+            if item.cache_type != "image" || item.deleted_at != 0 {
+                continue;
+            }
+            let image_hash = match &item.image_hash {
+                Some(h) if !h.is_empty() => h.clone(),
+                _ => continue,
+            };
+
+            // On-demand PULL: image record exists but has no local data
+            if item.image_data_url.is_none() || item.image_data_url.as_ref().map_or(true, |u| u.is_empty()) {
+                let img_file_name = build_image_file_name(&image_hash);
+                if let Some(img_content) = files.get(&img_file_name) {
+                    match parse_gist_content(img_content, sync_password) {
+                        Ok(img_data) => {
+                            if let Some(data_url) = img_data.get("image_data_url").and_then(|v| v.as_str()) {
+                                item.image_data_url = Some(data_url.to_string());
+                                item.content = String::new();
+                                image_pulled += 1;
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to parse image file {}: {}", img_file_name, e);
+                        }
+                    }
+                }
+            }
+
+            // Incremental PUSH: local image has data but not yet in remote image index
+            if let Some(ref data_url) = item.image_data_url {
+                if !data_url.is_empty() && !remote_meta.image_index.contains_key(&image_hash) {
+                    // Enforce per-image size limit
+                    let image_size = data_url.len();
+                    if image_size > SYNC_IMAGE_MAX_BYTES {
+                        log::warn!(
+                            "Image {} exceeds size limit ({} > {}), skipping",
+                            image_hash, image_size, SYNC_IMAGE_MAX_BYTES
+                        );
+                        continue;
+                    }
+
+                    let img_payload = serde_json::json!({ "image_data_url": data_url });
+                    let img_val = serde_json::to_value(&img_payload)
+                        .map_err(|e| format!("Serialize error: {}", e))?;
+                    let img_content = serialize_gist_content(&img_val, sync_password)?;
+                    image_files_to_upload.insert(
+                        build_image_file_name(&image_hash),
+                        Some(img_content),
+                    );
+                    new_image_index.insert(image_hash.clone(), ImageIndexEntry {
+                        uploaded_at: now,
+                        size: image_size,
+                    });
+                }
+            }
+        }
+
+        // Enforce total image quota
+        let total_size: usize = new_image_index.values().map(|e| e.size).sum();
+        if total_size > SYNC_IMAGE_TOTAL_MAX_BYTES {
+            log::warn!(
+                "Image quota exceeded ({} > {}), skipping new image uploads",
+                total_size, SYNC_IMAGE_TOTAL_MAX_BYTES
+            );
+            image_files_to_upload.clear();
+            // Revert newly added entries
+            for hash in new_image_index.keys().cloned().collect::<Vec<_>>() {
+                if !remote_meta.image_index.contains_key(&hash) {
+                    new_image_index.remove(&hash);
+                }
+            }
+        }
+
+        // Clean up orphaned image entries
+        for hash in new_image_index.keys().cloned().collect::<Vec<_>>() {
+            if !active_image_hashes.contains(&hash) {
+                image_files_to_upload.insert(build_image_file_name(&hash), None);
+                new_image_index.remove(&hash);
+            }
+        }
+    }
+
+    // 5. Combine deleted_ids
     let mut deleted_map: HashMap<String, DeletedEntry> = HashMap::new();
     for entry in &remote_meta.deleted_ids {
         deleted_map.insert(entry.id.clone(), entry.clone());
@@ -689,62 +1096,121 @@ pub async fn perform_sync(
             );
         }
     }
-    // Remove restored IDs from deleted_ids so other devices see the restoration
+    // Add loser IDs from dedup to deleted_ids
+    for loser_id in &loser_ids {
+        let existing_ts = deleted_map.get(loser_id).map(|e| e.deleted_at).unwrap_or(0);
+        if now > existing_ts {
+            deleted_map.insert(
+                loser_id.clone(),
+                DeletedEntry {
+                    id: loser_id.clone(),
+                    deleted_at: now,
+                },
+            );
+        }
+    }
+    // Remove restored IDs
     for restored_id in &local_restored_ids {
         deleted_map.remove(restored_id);
     }
-    // Prune entries older than 30 days
     let combined_deleted_ids: Vec<DeletedEntry> = deleted_map
         .into_values()
         .filter(|e| (now - e.deleted_at) < DELETED_IDS_TTL_MS)
         .collect();
 
-    // 5. Check if there are actual changes that require pushing to cloud
-    let has_changes = pulled > 0
+    // 6. Backfill content_hash for records that lack it
+    for item in &mut merged_list {
+        if item.content_hash.is_none() && item.cache_type != "image" && !item.content.is_empty() {
+            let h = db::compute_content_hash(&item.cache_type, &item.content, None);
+            if !h.is_empty() {
+                item.content_hash = Some(h);
+            }
+        }
+    }
+
+    // 7. Check if there are actual changes that require pushing to cloud
+    let image_changes = !image_files_to_upload.is_empty() || image_pulled > 0;
+    let has_changes = force_push
+        || pulled > 0
         || pushed > 0
         || merged > 0
         || local_updated > 0
+        || deduplicated > 0
         || deleted_count > 0
         || !local_pending_deleted.is_empty()
-        || !local_restored_ids.is_empty();
+        || !local_restored_ids.is_empty()
+        || image_changes;
 
     if has_changes {
-        // 6. Push: serialize and upload merged data (exclude soft-deleted records)
-        let upload_records: Vec<serde_json::Value> = merged_list
+        // 8. Push: serialize and upload merged data
+        let mut upload_items: Vec<&CacheItem> = merged_list
             .iter()
-            .filter(|item| item.deleted_at == 0)
-            .map(record_to_json)
+            .filter(|item| {
+                if item.deleted_at != 0 {
+                    return false;
+                }
+                if item.cache_type == "image" && !sync_images {
+                    return false;
+                }
+                true
+            })
+            .collect();
+        upload_items.sort_by(|a, b| {
+            match (a.pinned, b.pinned) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (true, true) => b.pinned_at.unwrap_or(0).cmp(&a.pinned_at.unwrap_or(0)),
+                _ => b.created_at.cmp(&a.created_at),
+            }
+        });
+        let upload_records: Vec<serde_json::Value> = upload_items
+            .iter()
+            .map(|item| record_to_json(item))
             .collect();
 
         let new_data = RemoteData {
-            version: 1,
+            version: SYNC_DATA_V2,
             app: "ClipStash".to_string(),
             records: upload_records,
         };
         let new_meta = SyncMeta {
-            version: 1,
+            version: SYNC_DATA_V2,
             last_sync_at: now,
             record_count: merged_list.len(),
             deleted_ids: combined_deleted_ids,
+            image_index: if sync_images { new_image_index } else { HashMap::new() },
         };
 
-        let data_str = serde_json::to_string_pretty(&new_data)
+        // Serialize
+        let data_val = serde_json::to_value(&new_data)
             .map_err(|e| format!("Serialize error: {}", e))?;
-        let meta_str = serde_json::to_string_pretty(&new_meta)
+        let meta_val = serde_json::to_value(&new_meta)
             .map_err(|e| format!("Serialize error: {}", e))?;
 
-        update_gist(&client, &headers, gist_id, &data_str, &meta_str).await?;
+        let data_str = serialize_gist_content(&data_val, sync_password)?;
+        let meta_str = serialize_gist_content(&meta_val, sync_password)?;
+
+        // Build combined files map: data + meta + image files
+        let mut all_files: HashMap<String, Option<String>> = HashMap::new();
+        all_files.insert(GIST_DATA_FILE.to_string(), Some(data_str));
+        all_files.insert(GIST_META_FILE.to_string(), Some(meta_str));
+        for (name, content) in &image_files_to_upload {
+            all_files.insert(name.clone(), content.clone());
+        }
+
+        update_gist_files(&client, &headers, gist_id, &all_files).await?;
 
         log::info!(
-            "Sync pushed: pulled={}, pushed={}, merged={}, localUpdated={}, deleted={}",
-            pulled, pushed, merged, local_updated, deleted_count
+            "Sync pushed: pulled={}, pushed={}, merged={}, localUpdated={}, deduplicated={}, deleted={}, imgPulled={}, imgUploaded={}",
+            pulled, pushed, merged, local_updated, deduplicated, deleted_count, image_pulled,
+            image_files_to_upload.values().filter(|v| v.is_some()).count()
         );
     } else {
         log::info!("Sync: no changes detected, skipping push");
     }
 
     let result = SyncResult {
-        pulled,
+        pulled: pulled + image_pulled,
         pushed,
         updated: merged,
         deleted: deleted_count as i32,

@@ -8,7 +8,10 @@ import {
   SYNC_MIN_INTERVAL_MS,
   SYNC_TOAST_DURATION,
   SYNC_AUTH_PATTERN,
+  SYNC_PASSWORD_MIN_LENGTH,
+  SYNC_PASSWORD_MAX_LENGTH,
 } from '../../utils/constants.js';
+import { getAdaptiveRefreshInterval } from '../../shared/dom-utils.js';
 import { getSyncSettings, saveSyncSettings, initSync, performSync, disconnectSync, formatSyncTime } from '../../utils/sync.js';
 import { onStorageChange } from '../../utils/storage.js';
 
@@ -28,6 +31,15 @@ const autoSyncToggleWrap = document.getElementById('auto-sync-toggle-wrap');
 const toggleAutoSync = document.getElementById('toggle-auto-sync');
 const autoSyncItem = document.querySelector('.settings-item--auto-sync');
 const btnSyncQuick = document.getElementById('btn-sync-quick');
+const syncPasswordItem = document.querySelector('.settings-item--sync-password');
+const syncImagesItem = document.querySelector('.settings-item--sync-images');
+const toggleSyncImages = document.getElementById('toggle-sync-images');
+const syncPasswordInput = document.getElementById('sync-password-input');
+const syncPasswordConfirmInput = document.getElementById('sync-password-confirm');
+const btnSyncPasswordSave = document.getElementById('btn-sync-password-save');
+const btnSyncPasswordRemove = document.getElementById('btn-sync-password-remove');
+const syncPasswordStatus = document.getElementById('sync-password-status');
+const syncEncryptionStatus = document.getElementById('sync-encryption-status');
 
 // State
 let syncPushTimer = null;
@@ -35,11 +47,26 @@ let isSyncing = false;
 let syncAuthFailed = false;
 let syncToastTimer = null;
 let autoSyncEnabled = true;
+let syncImagesEnabled = false;
+let lastSyncTimestamp = 0; // tracks lastSyncAt for periodic refresh
+let syncTimeRefreshTimer = null;
 
 // External callbacks
 let showConfirm = null;
 let hideConfirm = null;
 let onRefresh = null;
+
+/**
+ * translateSyncError translates known error message keys to i18n text.
+ * Falls back to the original message for unknown errors.
+ */
+function translateSyncError(msg) {
+  const knownKeys = ['syncPasswordWrong', 'syncPasswordRequired'];
+  for (const key of knownKeys) {
+    if (msg === key) return t(key);
+  }
+  return msg;
+}
 
 // ===== Sync Button State =====
 
@@ -152,8 +179,10 @@ function renderSyncState(syncSettings) {
     statusDot.className = 'sync-status-dot sync-status-dot--ok';
 
     if (syncSettings.lastSyncAt > 0) {
+      lastSyncTimestamp = syncSettings.lastSyncAt;
       syncLastSyncEl.textContent = t('syncLastSync', { t: formatSyncTime(syncSettings.lastSyncAt, t('syncNever')) });
     } else {
+      lastSyncTimestamp = 0;
       syncLastSyncEl.textContent = t('syncLastSync', { t: t('syncNever') });
     }
     syncLastSyncEl.style.display = '';
@@ -164,6 +193,16 @@ function renderSyncState(syncSettings) {
     // Read persisted auto-sync preference (default true)
     autoSyncEnabled = syncSettings.autoSync !== false;
     toggleAutoSync.checked = autoSyncEnabled;
+
+    // Enable sync password section when connected
+    syncPasswordItem.classList.remove('is-disabled');
+    renderSyncPasswordState(syncSettings.syncPassword || '');
+
+    // Enable sync images toggle when connected
+    toggleSyncImages.disabled = false;
+    syncImagesItem.classList.remove('is-disabled');
+    syncImagesEnabled = syncSettings.syncImages === true;
+    toggleSyncImages.checked = syncImagesEnabled;
   } else {
     syncSetupEl.style.display = 'block';
     syncConnectedEl.style.display = 'none';
@@ -173,14 +212,156 @@ function renderSyncState(syncSettings) {
     toggleAutoSync.checked = false;
     autoSyncItem.classList.add('is-disabled');
     autoSyncEnabled = false;
+
+    // Disable sync password section when disconnected
+    syncPasswordItem.classList.add('is-disabled');
+    syncPasswordInput.value = '';
+
+    // Disable sync images toggle when disconnected
+    toggleSyncImages.disabled = true;
+    toggleSyncImages.checked = false;
+    syncImagesItem.classList.add('is-disabled');
+    syncImagesEnabled = false;
+  }
+
+  // Re-schedule the adaptive "Last sync" time refresh whenever state changes
+  scheduleSyncTimeRefresh();
+}
+
+/**
+ * renderSyncPasswordState updates the password UI based on whether a password is set.
+ * @param {string} currentPassword - the current sync password (empty if not set)
+ */
+function renderSyncPasswordState(currentPassword) {
+  if (currentPassword) {
+    // Password is set — show masked dots and change/remove buttons
+    syncPasswordInput.value = '••••••••';
+    syncPasswordInput.disabled = true;
+    btnSyncPasswordSave.textContent = t('syncPasswordChange');
+    btnSyncPasswordSave.dataset.i18n = 'syncPasswordChange';
+    btnSyncPasswordSave.dataset.mode = 'change';
+    btnSyncPasswordRemove.style.display = '';
+    // Hide confirm input when password is already set
+    syncPasswordConfirmInput.style.display = 'none';
+    syncPasswordConfirmInput.value = '';
+    // Encryption ON
+    syncEncryptionStatus.textContent = t('syncEncryptionOn');
+    syncEncryptionStatus.dataset.i18n = 'syncEncryptionOn';
+    syncEncryptionStatus.className = 'sync-encryption-status encryption-on';
+  } else {
+    // No password — show empty input, confirm input, and set button
+    syncPasswordInput.value = '';
+    syncPasswordInput.disabled = false;
+    btnSyncPasswordSave.textContent = t('syncPasswordSet');
+    btnSyncPasswordSave.dataset.i18n = 'syncPasswordSet';
+    btnSyncPasswordSave.dataset.mode = 'set';
+    btnSyncPasswordRemove.style.display = 'none';
+    // Show confirm input for first-time password setup
+    syncPasswordConfirmInput.style.display = '';
+    syncPasswordConfirmInput.value = '';
+    // Encryption OFF
+    syncEncryptionStatus.textContent = t('syncEncryptionOff');
+    syncEncryptionStatus.dataset.i18n = 'syncEncryptionOff';
+    syncEncryptionStatus.className = 'sync-encryption-status encryption-off';
+  }
+  syncPasswordStatus.style.display = 'none';
+}
+
+function showSyncPasswordStatus(message, isError = false) {
+  syncPasswordStatus.textContent = message;
+  syncPasswordStatus.className = isError ? 'sync-password-status error' : 'sync-password-status success';
+  syncPasswordStatus.style.display = 'block';
+  setTimeout(() => { syncPasswordStatus.style.display = 'none'; }, 3000);
+}
+
+/**
+ * scheduleSyncTimeRefresh adaptively refreshes "Last sync: Xs ago".
+ * Cancels any pending timer and re-schedules based on the current age.
+ */
+function scheduleSyncTimeRefresh() {
+  clearTimeout(syncTimeRefreshTimer);
+  if (lastSyncTimestamp <= 0) return;
+  syncLastSyncEl.textContent = t('syncLastSync', { t: formatSyncTime(lastSyncTimestamp, t('syncNever')) });
+  const interval = getAdaptiveRefreshInterval(lastSyncTimestamp);
+  if (interval > 0) {
+    syncTimeRefreshTimer = setTimeout(scheduleSyncTimeRefresh, interval);
   }
 }
 
 function showSyncResult(message, isError) {
   syncResultEl.textContent = message;
   syncResultEl.className = isError ? 'sync-result error' : 'sync-result success';
-  syncResultEl.style.display = 'block';
+  syncResultEl.style.display = 'flex';
   setTimeout(() => { syncResultEl.style.display = 'none'; }, 5000);
+}
+
+/**
+ * showSyncPasswordWrongWithForcePush shows the password-wrong error
+ * along with a "Force Push" button that lets the user overwrite cloud data.
+ * @param {Function} showResultFn - function(message, isError) for displaying result
+ * @param {'settings'|'toast'} context - where to show the result
+ */
+function showSyncPasswordWrongWithForcePush(context) {
+  const errorMsg = t('syncFailed', { e: t('syncPasswordWrong') });
+
+  if (context === 'toast') {
+    // For toast and quick-sync, show error toast + a separate "Force Push" toast action
+    showSyncToast(errorMsg, true);
+    return;
+  }
+
+  // For settings panel: show error with Force Push button inline
+  syncResultEl.innerHTML = '';
+  syncResultEl.className = 'sync-result error';
+  syncResultEl.style.display = 'flex';
+
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = errorMsg;
+  syncResultEl.appendChild(msgSpan);
+
+  const forcePushBtn = document.createElement('button');
+  forcePushBtn.className = 'btn btn-danger btn-sm sync-force-push-btn';
+  forcePushBtn.textContent = t('syncForcePush');
+  forcePushBtn.addEventListener('click', () => {
+    syncResultEl.style.display = 'none';
+    handleForcePush();
+  });
+  syncResultEl.appendChild(forcePushBtn);
+}
+
+/**
+ * handleForcePush triggers a force-push sync after user confirmation.
+ */
+function handleForcePush() {
+  showConfirm(
+    t('syncForcePushConfirmTitle'),
+    t('syncForcePushConfirmDesc'),
+    t('syncForcePushConfirmOk'),
+    async () => {
+      hideConfirm();
+      btnSyncNow.disabled = true;
+      const spanEl = btnSyncNow.querySelector('span');
+      const originalText = spanEl.textContent;
+      spanEl.textContent = t('syncSyncing');
+      updateSyncIndicator('syncing');
+
+      try {
+        const result = await performSync({ forcePush: true });
+        showSyncResult(t('syncForcePushSuccess'), false);
+        await onRefresh();
+        const syncSettings = await getSyncSettings();
+        renderSyncState(syncSettings);
+        updateSyncIndicator('ok');
+      } catch (err) {
+        const msg = translateSyncError(typeof err === 'string' ? err : (err.message || 'Unknown error'));
+        showSyncResult(t('syncFailed', { e: msg }), true);
+        updateSyncIndicator('error');
+      } finally {
+        btnSyncNow.disabled = false;
+        spanEl.textContent = originalText;
+      }
+    }
+  );
 }
 
 // ===== Init =====
@@ -189,6 +370,20 @@ function showSyncResult(message, isError) {
  * initSyncUI wires up sync UI events and performs initial load
  * @param {Object} callbacks
  */
+/**
+ * refreshSyncState re-reads sync settings and re-renders the sync UI.
+ * Call this when the settings panel opens to reset any stale editing state
+ * (e.g. user clicked "Change" password but closed without saving).
+ */
+export async function refreshSyncState() {
+  try {
+    const syncSettings = await getSyncSettings();
+    renderSyncState(syncSettings);
+  } catch {
+    // ignore — sync may not be configured
+  }
+}
+
 export async function initSyncUI(callbacks) {
   showConfirm = callbacks.showConfirm;
   hideConfirm = callbacks.hideConfirm;
@@ -212,6 +407,76 @@ export async function initSyncUI(callbacks) {
     if (!autoSyncEnabled) {
       clearTimeout(syncPushTimer);
     }
+  });
+
+  // Sync images toggle
+  toggleSyncImages.addEventListener('change', async () => {
+    syncImagesEnabled = toggleSyncImages.checked;
+    const settings = await getSyncSettings();
+    settings.syncImages = syncImagesEnabled;
+    await saveSyncSettings(settings);
+  });
+
+  // Sync Password: Save/Change
+  btnSyncPasswordSave.addEventListener('click', async () => {
+    const mode = btnSyncPasswordSave.dataset.mode;
+    if (mode === 'change') {
+      // Switch to edit mode — show both input and confirm row
+      syncPasswordInput.value = '';
+      syncPasswordInput.disabled = false;
+      syncPasswordInput.focus();
+      syncPasswordConfirmInput.style.display = '';
+      syncPasswordConfirmInput.value = '';
+      btnSyncPasswordSave.textContent = t('syncPasswordSet');
+      btnSyncPasswordSave.dataset.i18n = 'syncPasswordSet';
+      btnSyncPasswordSave.dataset.mode = 'set';
+      return;
+    }
+
+    const newPassword = syncPasswordInput.value.trim();
+    if (!newPassword) {
+      syncPasswordInput.style.borderColor = 'var(--danger)';
+      setTimeout(() => { syncPasswordInput.style.borderColor = ''; }, 1500);
+      return;
+    }
+
+    // Validate password length
+    if (newPassword.length < SYNC_PASSWORD_MIN_LENGTH) {
+      syncPasswordInput.style.borderColor = 'var(--danger)';
+      showSyncPasswordStatus(t('syncPasswordTooShort', { n: SYNC_PASSWORD_MIN_LENGTH }), true);
+      setTimeout(() => { syncPasswordInput.style.borderColor = ''; }, 1500);
+      return;
+    }
+    if (newPassword.length > SYNC_PASSWORD_MAX_LENGTH) {
+      syncPasswordInput.style.borderColor = 'var(--danger)';
+      showSyncPasswordStatus(t('syncPasswordTooLong', { n: SYNC_PASSWORD_MAX_LENGTH }), true);
+      setTimeout(() => { syncPasswordInput.style.borderColor = ''; }, 1500);
+      return;
+    }
+
+    // Validate confirm password matches
+    const confirmPassword = syncPasswordConfirmInput.value.trim();
+    if (newPassword !== confirmPassword) {
+      syncPasswordConfirmInput.style.borderColor = 'var(--danger)';
+      showSyncPasswordStatus(t('syncPasswordMismatch'), true);
+      setTimeout(() => { syncPasswordConfirmInput.style.borderColor = ''; }, 1500);
+      return;
+    }
+
+    const settings = await getSyncSettings();
+    settings.syncPassword = newPassword;
+    await saveSyncSettings(settings);
+    renderSyncPasswordState(newPassword);
+    showSyncPasswordStatus(t('syncPasswordSaved'));
+  });
+
+  // Sync Password: Remove
+  btnSyncPasswordRemove.addEventListener('click', async () => {
+    const settings = await getSyncSettings();
+    settings.syncPassword = '';
+    await saveSyncSettings(settings);
+    renderSyncPasswordState('');
+    showSyncPasswordStatus(t('syncPasswordRemoved'));
   });
 
   // Connect
@@ -266,8 +531,13 @@ export async function initSyncUI(callbacks) {
       renderSyncState(syncSettings);
       updateSyncIndicator('ok');
     } catch (err) {
-      const msg = typeof err === 'string' ? err : (err.message || 'Unknown error');
-      showSyncResult(t('syncFailed', { e: msg }), true);
+      const rawMsg = typeof err === 'string' ? err : (err.message || 'Unknown error');
+      if (rawMsg === 'syncPasswordWrong') {
+        showSyncPasswordWrongWithForcePush('settings');
+      } else {
+        const msg = translateSyncError(rawMsg);
+        showSyncResult(t('syncFailed', { e: msg }), true);
+      }
       statusDot.className = 'sync-status-dot sync-status-dot--err';
       updateSyncIndicator('error');
     } finally {
@@ -294,7 +564,8 @@ export async function initSyncUI(callbacks) {
       renderSyncState(syncSettings);
       updateSyncIndicator('ok');
     } catch (err) {
-      const msg = typeof err === 'string' ? err : (err.message || 'Unknown error');
+      const rawMsg = typeof err === 'string' ? err : (err.message || 'Unknown error');
+      const msg = translateSyncError(rawMsg);
       showSyncToast(t('syncFailed', { e: msg }), true);
       updateSyncIndicator('error');
     } finally {

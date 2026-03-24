@@ -198,9 +198,7 @@ export function openModal(item) {
   modalHeaderId.style.display = '';
   modalHeaderActions.style.display = '';
 
-  const idStr = String(item.id);
-  const shortId = idStr.includes('_') ? idStr.split('_').pop() : idStr.slice(0, 8);
-  modalHeaderId.textContent = `#${shortId}`;
+  modalHeaderId.textContent = `#${item.id}`;
 
   updatePinButton(item.pinned);
 

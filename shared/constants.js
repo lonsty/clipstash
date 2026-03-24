@@ -26,6 +26,7 @@ export const SEARCH_DEBOUNCE_DELAY = 250;
 export const FEEDBACK_DISPLAY_DURATION = 1500;
 export const TAG_HINT_DURATION = 2000;
 export const COPY_FEEDBACK_DURATION = 1500;
+export const RELATIVE_TIME_REFRESH_MS = 10 * 1000; // 10s — refresh relative time displays
 
 // ===== Sync Constants =====
 export const SYNC_PUSH_DEBOUNCE_DELAY = 3000;
@@ -35,6 +36,8 @@ export const SYNC_PERIODIC_PULL_MS = 5 * 60 * 1000; // 5 minutes (for setInterva
 export const SYNC_TOAST_DURATION = 3000;
 export const SYNC_RESULT_DURATION = 5000;
 export const SYNC_AUTH_PATTERN = /HTTP\s*(401|403)|Unauthorized|Forbidden/i;
+export const SYNC_PASSWORD_MIN_LENGTH = 4;
+export const SYNC_PASSWORD_MAX_LENGTH = 64;
 
 // ===== Trash / Soft Delete =====
 export const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -60,3 +63,13 @@ export const GIST_DATA_FILE = 'clipstash-data.json';
 export const GIST_META_FILE = 'clipstash-meta.json';
 export const GIST_DESCRIPTION = 'ClipStash Cloud Sync Data (do not delete)';
 export const GITHUB_API_BASE = 'https://api.github.com';
+
+// ===== Image Sync =====
+export const GIST_IMAGE_FILE_PREFIX = 'clipstash-img-';
+export const SYNC_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB per image (original data URL)
+export const SYNC_IMAGE_TOTAL_MAX_BYTES = 50 * 1024 * 1024; // 50 MB total image quota
+
+// ===== Sync Data Format =====
+export const SYNC_DATA_VERSION = 2; // v2: base64(encrypt(gzip(json)))
+export const SYNC_DATA_V1 = 1;
+export const SYNC_DATA_V2 = 2;

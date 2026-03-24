@@ -1,5 +1,6 @@
 mod clipboard;
 mod commands;
+mod crypto;
 mod db;
 mod hotkey;
 mod monitor;

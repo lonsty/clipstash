@@ -53,10 +53,28 @@ function notifyChange(action, detail) {
   }
 }
 
+/**
+ * generateId generates a random identifier (10 hex chars = 5 bytes)
+ * @returns {string} e.g. "a3f7e2b14c"
+ */
 function generateId() {
-  const ts = Date.now();
-  const rand = Math.random().toString(16).slice(2, 10);
-  return `${ts}_${rand}`;
+  const arr = new Uint8Array(5);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * generateUniqueId generates a collision-free ID against an existing set
+ * @param {Set<string>|Array<string>} existingIds - IDs already in use
+ * @returns {string} a unique 10 hex char ID
+ */
+function generateUniqueId(existingIds) {
+  const ids = existingIds instanceof Set ? existingIds : new Set(existingIds);
+  let id = generateId();
+  while (ids.has(id)) {
+    id = generateId();
+  }
+  return id;
 }
 
 // ===== Settings =====

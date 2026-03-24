@@ -68,7 +68,7 @@ export function createCacheCard(item, callbacks) {
     <div class="cache-footer">
       <div class="cache-meta">
         ${typeBadge}
-        <span>${metaText} · ${metaTime}</span>
+        <span>${metaText} · <span data-relative-time="${item.createdAt}">${metaTime}</span></span>
       </div>
       <div class="cache-actions">
         <button class="btn-icon copy-btn" title="${t('copy')}">${ICON_COPY}</button>

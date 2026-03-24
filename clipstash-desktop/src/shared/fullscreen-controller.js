@@ -137,9 +137,7 @@ export function renderContent(item) {
   }
 
   // Set header ID badge
-  const idStr = String(item.id);
-  const shortId = idStr.includes('_') ? idStr.split('_').pop() : idStr.slice(0, 8);
-  fsHeaderId.textContent = `#${shortId}`;
+  fsHeaderId.textContent = `#${item.id}`;
 
   // Meta info
   const sizeInfo = type === 'image'

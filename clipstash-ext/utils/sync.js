@@ -5,19 +5,23 @@ import {
   setCachesRaw,
   toSnakeRecordExport,
   fromSnakeRecordImport,
+  computeContentHashExport,
   getPendingDeleted,
   clearPendingDeleted,
   getPendingRestored,
   clearPendingRestored,
-  softDeleteCache,
-  purgeExpiredCaches,
 } from './storage.js';
+import { packSyncData, unpackSyncData, encryptToken, decryptToken } from '../shared/crypto.js';
 
 const GIST_DATA_FILE = 'clipstash-data.json';
 const GIST_META_FILE = 'clipstash-meta.json';
+const GIST_IMAGE_PREFIX = 'clipstash-img-';
 const GIST_DESCRIPTION = 'ClipStash Cloud Sync Data (do not delete)';
 const API_BASE = 'https://api.github.com';
 const SYNC_SETTINGS_KEY = 'clipstash-sync';
+const SYNC_DATA_V2 = 2;
+const SYNC_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB per image
+const SYNC_IMAGE_TOTAL_MAX_BYTES = 50 * 1024 * 1024; // 50 MB total quota
 
 // 30 days in ms — deleted_ids entries older than this are pruned
 const DELETED_IDS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -25,32 +29,61 @@ const DELETED_IDS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // ===== Sync Settings Persistence =====
 
 /**
- * getSyncSettings retrieves cloud sync settings from storage
+ * getSyncSettings retrieves cloud sync settings from storage.
+ * If the token is encrypted (prefixed with 'enc:'), it is decrypted before returning.
  * @returns {Promise<Object>}
  */
 export async function getSyncSettings() {
   try {
     const data = await chrome.storage.local.get(SYNC_SETTINGS_KEY);
-    return {
+    const raw = {
       token: '',
       gistId: '',
       enabled: false,
       lastSyncAt: 0,
       autoSync: true,
+      syncPassword: '',
+      syncImages: false,
       ...data[SYNC_SETTINGS_KEY],
     };
+
+    // Decrypt token if stored encrypted
+    if (raw.token && raw.token.startsWith('enc:')) {
+      try {
+        raw.token = await decryptToken(raw.token.slice(4), raw.syncPassword);
+      } catch {
+        // Decryption failed — likely password changed or corrupted; keep encrypted form
+        console.warn('[Sync] Failed to decrypt stored token');
+      }
+    }
+
+    return raw;
   } catch {
-    return { token: '', gistId: '', enabled: false, lastSyncAt: 0, autoSync: true };
+    return { token: '', gistId: '', enabled: false, lastSyncAt: 0, autoSync: true, syncPassword: '', syncImages: false };
   }
 }
 
 /**
- * saveSyncSettings persists cloud sync settings
+ * saveSyncSettings persists cloud sync settings.
+ * The token is encrypted before storage for security.
  * @param {Object} settings
  * @returns {Promise<void>}
  */
 export async function saveSyncSettings(settings) {
-  await chrome.storage.local.set({ [SYNC_SETTINGS_KEY]: settings });
+  const toStore = { ...settings };
+
+  // Encrypt token before storing (skip if already encrypted or empty)
+  if (toStore.token && !toStore.token.startsWith('enc:')) {
+    try {
+      const encrypted = await encryptToken(toStore.token, toStore.syncPassword);
+      toStore.token = `enc:${encrypted}`;
+    } catch {
+      // Fallback: store as-is if encryption fails (should not happen)
+      console.warn('[Sync] Failed to encrypt token for storage');
+    }
+  }
+
+  await chrome.storage.local.set({ [SYNC_SETTINGS_KEY]: toStore });
 }
 
 // ===== GitHub API Helpers =====
@@ -120,8 +153,8 @@ async function findClipstashGist(token) {
  * @returns {Promise<string>} gist ID
  */
 async function createGist(token) {
-  const emptyData = { version: 1, app: 'ClipStash', records: [] };
-  const emptyMeta = { version: 1, last_sync_at: 0, record_count: 0, deleted_ids: [] };
+  const emptyData = { version: SYNC_DATA_V2, app: 'ClipStash', records: [] };
+  const emptyMeta = { version: SYNC_DATA_V2, last_sync_at: 0, record_count: 0, deleted_ids: [] };
 
   const resp = await fetch(`${API_BASE}/gists`, {
     method: 'POST',
@@ -130,8 +163,8 @@ async function createGist(token) {
       description: GIST_DESCRIPTION,
       public: false,
       files: {
-        [GIST_DATA_FILE]: { content: JSON.stringify(emptyData, null, 2) },
-        [GIST_META_FILE]: { content: JSON.stringify(emptyMeta, null, 2) },
+        [GIST_DATA_FILE]: { content: JSON.stringify(emptyData) },
+        [GIST_META_FILE]: { content: JSON.stringify(emptyMeta) },
       },
     }),
   });
@@ -144,7 +177,8 @@ async function createGist(token) {
 }
 
 /**
- * getGistFiles fetches gist file contents
+ * getGistFiles fetches gist file contents.
+ * For truncated files (>1 MB), fetches full content via raw_url.
  * @param {string} token
  * @param {string} gistId
  * @returns {Promise<Object>} map of filename → content
@@ -159,30 +193,46 @@ async function getGistFiles(token, gistId) {
   const files = {};
   if (body.files) {
     for (const [name, fileObj] of Object.entries(body.files)) {
-      if (fileObj.content) files[name] = fileObj.content;
+      if (fileObj.truncated && fileObj.raw_url) {
+        // File exceeds ~1 MB — fetch full content via raw_url.
+        // Do NOT send Authorization header here: raw_url points to
+        // gist.githubusercontent.com which rejects CORS preflight
+        // triggered by custom headers. The URL already contains an
+        // embedded access token.
+        try {
+          const rawResp = await fetch(fileObj.raw_url);
+          if (rawResp.ok) {
+            files[name] = await rawResp.text();
+          } else {
+            console.warn(`[Sync] Failed to fetch raw_url for ${name}: HTTP ${rawResp.status}`);
+          }
+        } catch (e) {
+          console.warn(`[Sync] Network error fetching raw_url for ${name}:`, e);
+        }
+      } else if (fileObj.content) {
+        files[name] = fileObj.content;
+      }
     }
   }
   return files;
 }
 
 /**
- * updateGist updates gist files
+ * updateGistFiles updates one or more gist files.
  * @param {string} token
  * @param {string} gistId
- * @param {string} dataContent
- * @param {string} metaContent
+ * @param {Object} filesMap - map of filename → content string (or null to delete)
  * @returns {Promise<void>}
  */
-async function updateGist(token, gistId, dataContent, metaContent) {
+async function updateGistFiles(token, gistId, filesMap) {
+  const files = {};
+  for (const [name, content] of Object.entries(filesMap)) {
+    files[name] = content === null ? null : { content };
+  }
   const resp = await fetch(`${API_BASE}/gists/${gistId}`, {
     method: 'PATCH',
     headers: { ...buildHeaders(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      files: {
-        [GIST_DATA_FILE]: { content: dataContent },
-        [GIST_META_FILE]: { content: metaContent },
-      },
-    }),
+    body: JSON.stringify({ files }),
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -190,39 +240,118 @@ async function updateGist(token, gistId, dataContent, metaContent) {
   }
 }
 
+/**
+ * buildImageFileName returns the Gist filename for a given image hash.
+ * @param {string} imageHash
+ * @returns {string}
+ */
+function buildImageFileName(imageHash) {
+  return `${GIST_IMAGE_PREFIX}${imageHash}.json`;
+}
+
+/**
+ * formatBytes returns a human-readable byte size string.
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ===== V2 Data Format Helpers =====
+
+/**
+ * parseGistContent auto-detects v1 (plain JSON) vs v2 (encrypted+gzip) format.
+ * v2 content is NOT valid JSON — it's a base64 string of encrypt(gzip(json)).
+ * @param {string} content - raw gist file content
+ * @param {string} syncPassword - user's sync password (empty = no encryption)
+ * @returns {Promise<Object>} parsed JSON object
+ */
+async function parseGistContent(content, syncPassword) {
+  // Try JSON.parse first (v1 plain JSON)
+  try {
+    const parsed = JSON.parse(content);
+    // If it has a `version` field, it's a valid v1 data envelope
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch {
+    // Not valid JSON — likely v2 encrypted format
+  }
+
+  // v2: base64(encrypt(gzip(json))) — requires sync password
+  if (!syncPassword) {
+    throw new Error('syncPasswordRequired');
+  }
+
+  const jsonStr = await unpackSyncData(content, syncPassword);
+  return JSON.parse(jsonStr);
+}
+
+/**
+ * serializeGistContent serializes data for upload.
+ * If syncPassword is set, uses v2 format: base64(encrypt(gzip(json))).
+ * If no password, uses v1 plain JSON for backward compatibility.
+ * @param {Object} data - the data object to serialize
+ * @param {string} syncPassword - user's sync password (empty = plain JSON)
+ * @returns {Promise<string>} serialized content string
+ */
+async function serializeGistContent(data, syncPassword) {
+  const jsonStr = JSON.stringify(data);
+  if (!syncPassword) {
+    return jsonStr;
+  }
+  return packSyncData(jsonStr, syncPassword);
+}
+
 // ===== Merge Logic (Last-Write-Wins) =====
 
 /**
  * mergeRecords performs LWW merge between local and remote records.
+ * Matching order: 1) by ID  2) by contentHash (cross-device dedup)  3) new record.
  * Records present in localDeletedIdSet are treated as intentionally deleted
  * and will NOT be pulled back from remote.
- * MVP: skips image records.
+ * When syncImages is true, image records are included in the merge (matched by imageHash).
  * @param {Array} localCaches - local camelCase records
  * @param {Array} remoteRecords - remote snake_case JSON records
  * @param {Set<string>} localDeletedIdSet - IDs deleted locally since last sync
- * @returns {{merged: Array, pulled: number, pushed: number, conflicts: number}}
+ * @param {boolean} syncImages - whether to include images in merge
+ * @returns {{merged: Array, pulled: number, pushed: number, conflicts: number, localUpdated: number, deduplicated: number, mergedLoserIds: Set}}
  */
-function mergeRecords(localCaches, remoteRecords, localDeletedIdSet) {
-  // Build local map (skip images for MVP)
+function mergeRecords(localCaches, remoteRecords, localDeletedIdSet, syncImages = false) {
+  // Build local map
   const localMap = new Map();
+  const localHashMap = new Map(); // contentHash → id (for cross-device dedup)
+  const localImageHashMap = new Map(); // imageHash → id (for image dedup)
   for (const item of localCaches) {
-    if (item.type !== 'image') {
-      localMap.set(item.id, item);
+    if (!syncImages && item.type === 'image') continue;
+    localMap.set(item.id, item);
+    if (item.type !== 'image' && item.contentHash) {
+      localHashMap.set(item.contentHash, item.id);
+    }
+    if (item.type === 'image' && item.imageHash) {
+      localImageHashMap.set(item.imageHash, item.id);
     }
   }
 
   let pulled = 0;
   let conflicts = 0;
   let localUpdated = 0;
+  let deduplicated = 0;
 
   // Build remote lookup for quick access
   const remoteMap = new Map();
   for (const remoteJson of remoteRecords) {
     const remoteItem = fromSnakeRecordImport(remoteJson);
-    if (remoteItem.id && remoteItem.type !== 'image') {
-      remoteMap.set(remoteItem.id, remoteItem);
-    }
+    if (!remoteItem.id) continue;
+    if (!syncImages && remoteItem.type === 'image') continue;
+    remoteMap.set(remoteItem.id, remoteItem);
   }
+
+  // Track IDs that were merged via contentHash so we can clean up the loser ID
+  const mergedLoserIds = new Set();
 
   // Process remote records
   for (const [, remoteItem] of remoteMap) {
@@ -230,17 +359,47 @@ function mergeRecords(localCaches, remoteRecords, localDeletedIdSet) {
     if (localDeletedIdSet.has(remoteItem.id)) continue;
 
     if (localMap.has(remoteItem.id)) {
+      // 1) ID match → LWW
       const localItem = localMap.get(remoteItem.id);
-      // LWW: remote wins if newer
       if ((remoteItem.updatedAt || 0) > (localItem.updatedAt || 0)) {
         localMap.set(remoteItem.id, remoteItem);
         conflicts++;
       } else if ((localItem.updatedAt || 0) > (remoteItem.updatedAt || 0)) {
-        // Local wins — record has been modified locally (e.g. tags, language)
         localUpdated++;
       }
+    } else if (remoteItem.type === 'image' && remoteItem.imageHash && localImageHashMap.has(remoteItem.imageHash)) {
+      // Image dedup: same imageHash on different devices → LWW merge
+      const localId = localImageHashMap.get(remoteItem.imageHash);
+      const localItem = localMap.get(localId);
+      if (localItem) {
+        if ((remoteItem.updatedAt || 0) > (localItem.updatedAt || 0)) {
+          localMap.delete(localId);
+          localMap.set(remoteItem.id, remoteItem);
+          mergedLoserIds.add(localId);
+        } else {
+          mergedLoserIds.add(remoteItem.id);
+        }
+        deduplicated++;
+      }
+    } else if (remoteItem.type !== 'image' && remoteItem.contentHash && localHashMap.has(remoteItem.contentHash)) {
+      // 2) contentHash match → same content on different devices, LWW merge
+      const localId = localHashMap.get(remoteItem.contentHash);
+      const localItem = localMap.get(localId);
+      if (localItem) {
+        // LWW: pick the winner, discard the loser's ID
+        if ((remoteItem.updatedAt || 0) > (localItem.updatedAt || 0)) {
+          // Remote wins: adopt remote record, remove local
+          localMap.delete(localId);
+          localMap.set(remoteItem.id, remoteItem);
+          mergedLoserIds.add(localId);
+        } else {
+          // Local wins: keep local, mark remote ID as loser
+          mergedLoserIds.add(remoteItem.id);
+        }
+        deduplicated++;
+      }
     } else {
-      // Remote-only record → pull in
+      // 3) No match → remote-only record, pull in
       localMap.set(remoteItem.id, remoteItem);
       pulled++;
     }
@@ -248,15 +407,18 @@ function mergeRecords(localCaches, remoteRecords, localDeletedIdSet) {
 
   // Count pushed (local-only, not present in remote at all)
   const pushed = localCaches.filter(
-    item => item.type !== 'image' && !remoteMap.has(item.id)
+    item => {
+      if (!syncImages && item.type === 'image') return false;
+      return !remoteMap.has(item.id) && !mergedLoserIds.has(item.id);
+    }
   ).length;
 
-  // Rebuild merged list: include images unchanged + merged text/html
-  const imageItems = localCaches.filter(item => item.type === 'image');
-  const mergedTextItems = [...localMap.values()];
-  const merged = [...imageItems, ...mergedTextItems];
+  // Rebuild merged list: include unsynced images unchanged + merged records
+  const unsyncedImages = syncImages ? [] : localCaches.filter(item => item.type === 'image');
+  const mergedItems = [...localMap.values()];
+  const merged = [...unsyncedImages, ...mergedItems];
 
-  return { merged, pulled, pushed, conflicts, localUpdated };
+  return { merged, pulled, pushed, conflicts, localUpdated, deduplicated, mergedLoserIds };
 }
 
 // ===== Public Sync Operations =====
@@ -274,11 +436,15 @@ export async function initSync(token) {
     gistId = await createGist(token);
   }
 
+  // Preserve existing syncPassword and syncImages if reconnecting
+  const existing = await getSyncSettings();
   const settings = {
     token,
     gistId,
     enabled: true,
     lastSyncAt: 0,
+    syncPassword: existing.syncPassword || '',
+    syncImages: existing.syncImages || false,
   };
   await saveSyncSettings(settings);
 
@@ -289,36 +455,49 @@ export async function initSync(token) {
 /**
  * performSync executes a full sync cycle: pull → merge → push
  * Properly handles local deletions by tracking them in pending_deleted_ids.
+ * When syncImages is enabled, also handles image file upload/download via Gist.
+ * @param {Object} [options]
+ * @param {boolean} [options.forcePush=false] - Skip remote data pull, push local data directly (used when password is wrong)
  * @returns {Promise<{pulled: number, pushed: number, merged: number}>}
  */
-export async function performSync() {
+export async function performSync(options = {}) {
+  const { forcePush = false } = options;
   const settings = await getSyncSettings();
   if (!settings.enabled || !settings.token || !settings.gistId) {
     throw new Error('Sync not configured');
   }
 
-  const { token, gistId } = settings;
+  const { token, gistId, syncPassword, syncImages } = settings;
 
-  // 1. Pull: fetch remote data
-  const files = await getGistFiles(token, gistId);
+  // 1. Pull: fetch remote data (auto-detects v1 JSON vs v2 encrypted)
+  // In forcePush mode, we still fetch files for image index but skip data/meta parse
+  const files = forcePush ? {} : await getGistFiles(token, gistId);
   let remoteRecords = [];
-  if (files[GIST_DATA_FILE]) {
+  if (!forcePush && files[GIST_DATA_FILE]) {
     try {
-      const remoteData = JSON.parse(files[GIST_DATA_FILE]);
-      remoteRecords = remoteData.records || [];
-    } catch {
+      const parsed = await parseGistContent(files[GIST_DATA_FILE], syncPassword);
+      remoteRecords = parsed.records || [];
+    } catch (err) {
+      // If a sync password is set and decryption failed, always treat as wrong password.
+      if (syncPassword) {
+        throw new Error('syncPasswordWrong');
+      }
       remoteRecords = [];
     }
   }
 
-  // Parse remote meta (for deleted_ids from other devices)
+  // Parse remote meta (for deleted_ids and image_index from other devices)
   let remoteDeletedIds = [];
-  if (files[GIST_META_FILE]) {
+  let remoteImageIndex = {};
+  if (!forcePush && files[GIST_META_FILE]) {
     try {
-      const remoteMeta = JSON.parse(files[GIST_META_FILE]);
-      remoteDeletedIds = remoteMeta.deleted_ids || [];
+      const parsed = await parseGistContent(files[GIST_META_FILE], syncPassword);
+      remoteDeletedIds = parsed.deleted_ids || [];
+      remoteImageIndex = parsed.image_index || {};
     } catch {
+      // Meta-only failure is tolerable
       remoteDeletedIds = [];
+      remoteImageIndex = {};
     }
   }
 
@@ -330,20 +509,17 @@ export async function performSync() {
   const localRestoredIdSet = new Set(pendingRestored);
 
   // 3. Merge (respects local deletions — won't pull back deleted records)
-  const { merged, pulled, pushed, conflicts, localUpdated } = mergeRecords(
+  const { merged, pulled, pushed, conflicts, localUpdated, deduplicated, mergedLoserIds } = mergeRecords(
     localCaches,
     remoteRecords,
-    localDeletedIdSet
+    localDeletedIdSet,
+    syncImages
   );
 
   // 4. Apply remote deleted_ids: soft-delete records that were deleted on another device
-  //    Instead of removing them, mark them with deletedAt so the user can recover.
-  //    IMPORTANT: Skip IDs that were restored locally — the user intentionally restored
-  //    them, so we must NOT re-apply the cloud deletion.
   const remoteDeletedIdSet = new Set(
     remoteDeletedIds.map(e => (typeof e === 'string' ? e : e.id))
   );
-  // Build a lookup for the deleted_at timestamp from remote
   const remoteDeletedAtMap = new Map();
   for (const e of remoteDeletedIds) {
     if (typeof e === 'string') {
@@ -354,7 +530,6 @@ export async function performSync() {
   }
   let softDeletedCount = 0;
   for (const item of merged) {
-    // Skip locally-restored records — don't re-delete them
     if (localRestoredIdSet.has(item.id)) continue;
     if (remoteDeletedIdSet.has(item.id) && !item.deletedAt) {
       item.deletedAt = remoteDeletedAtMap.get(item.id) || Date.now();
@@ -369,16 +544,86 @@ export async function performSync() {
     return (now - item.deletedAt) < DELETED_IDS_TTL_MS;
   });
 
-  // 5. Save merged locally
+  // 5. Image sync: on-demand pull + incremental push
+  let imageFilesToUpload = {};
+  let newImageIndex = { ...remoteImageIndex };
+  let imagePulled = 0;
+
+  if (syncImages) {
+    // Collect all active image records and their hashes
+    const activeImages = filteredMerged.filter(item => item.type === 'image' && !item.deletedAt);
+    const activeImageHashes = new Set();
+
+    for (const img of activeImages) {
+      if (!img.imageHash) continue;
+      activeImageHashes.add(img.imageHash);
+
+      // On-demand PULL: image record exists but has no local data — download from Gist
+      if (!img.imageDataUrl) {
+        const imgFileName = buildImageFileName(img.imageHash);
+        if (files[imgFileName]) {
+          try {
+            const imgData = await parseGistContent(files[imgFileName], syncPassword);
+            if (imgData.image_data_url) {
+              img.imageDataUrl = imgData.image_data_url;
+              img.content = ''; // image records use imageDataUrl, not content
+              imagePulled++;
+            }
+          } catch {
+            console.warn(`[Sync] Failed to parse image file: ${imgFileName}`);
+          }
+        }
+      }
+
+      // Incremental PUSH: local image has data but not yet in remote image index
+      if (img.imageDataUrl && !remoteImageIndex[img.imageHash]) {
+        // Enforce per-image size limit
+        const imageSize = img.imageDataUrl.length;
+        if (imageSize > SYNC_IMAGE_MAX_BYTES) {
+          console.warn(`[Sync] Image ${img.imageHash} exceeds size limit (${formatBytes(imageSize)} > ${formatBytes(SYNC_IMAGE_MAX_BYTES)}), skipping`);
+          continue;
+        }
+
+        const imgPayload = { image_data_url: img.imageDataUrl };
+        const imgContent = await serializeGistContent(imgPayload, syncPassword);
+        imageFilesToUpload[buildImageFileName(img.imageHash)] = imgContent;
+        newImageIndex[img.imageHash] = { uploaded_at: now, size: imageSize };
+      }
+    }
+
+    // Enforce total image quota
+    let totalSize = 0;
+    for (const hash of Object.keys(newImageIndex)) {
+      totalSize += (newImageIndex[hash].size || 0);
+    }
+    if (totalSize > SYNC_IMAGE_TOTAL_MAX_BYTES) {
+      console.warn(`[Sync] Image quota exceeded (${formatBytes(totalSize)} > ${formatBytes(SYNC_IMAGE_TOTAL_MAX_BYTES)}), skipping new image uploads`);
+      imageFilesToUpload = {};
+      // Revert newly added entries
+      for (const hash of Object.keys(newImageIndex)) {
+        if (!remoteImageIndex[hash]) {
+          delete newImageIndex[hash];
+        }
+      }
+    }
+
+    // Clean up orphaned image entries (images whose records are deleted)
+    for (const hash of Object.keys(newImageIndex)) {
+      if (!activeImageHashes.has(hash)) {
+        // Mark for deletion from Gist (null = delete file)
+        imageFilesToUpload[buildImageFileName(hash)] = null;
+        delete newImageIndex[hash];
+      }
+    }
+  }
+
+  // 6. Save merged locally
   await setCachesRaw(filteredMerged);
 
-  // 6. Combine deleted_ids: merge remote + local pending, then prune expired.
-  //    Also remove any IDs that were restored locally — they should no longer
-  //    be in the cloud deleted_ids list so other devices don't re-delete them.
+  // 7. Combine deleted_ids
   const normalizedRemote = remoteDeletedIds.map(e =>
     (typeof e === 'string' ? { id: e, deleted_at: 0 } : e)
   );
-  // Merge remote + local pending, dedup by id (keep latest deleted_at)
   const deletedMap = new Map();
   for (const entry of normalizedRemote) {
     deletedMap.set(entry.id, entry);
@@ -389,58 +634,103 @@ export async function performSync() {
       deletedMap.set(entry.id, entry);
     }
   }
-  // Remove restored IDs from deleted_ids so other devices see the restoration
   for (const restoredId of localRestoredIdSet) {
     deletedMap.delete(restoredId);
   }
-  // Prune entries older than 30 days
-  const combinedDeletedIds = [...deletedMap.values()]
-    .filter(e => (now - (e.deleted_at || 0)) < DELETED_IDS_TTL_MS);
 
-  // 7. Check if there are actual changes that require pushing to cloud
-  const hasChanges = pulled > 0
+  // 8. Check if there are actual changes that require pushing to cloud
+  const imageChanges = Object.keys(imageFilesToUpload).length > 0 || imagePulled > 0;
+  const hasChanges = forcePush
+    || pulled > 0
     || pushed > 0
     || conflicts > 0
     || localUpdated > 0
+    || deduplicated > 0
     || softDeletedCount > 0
     || pendingDeleted.length > 0
-    || pendingRestored.length > 0;
+    || pendingRestored.length > 0
+    || imageChanges;
 
   if (hasChanges) {
-    // 8. Push: upload merged data (exclude soft-deleted and image records)
-    const uploadRecords = filteredMerged
-      .filter(item => item.type !== 'image' && !item.deletedAt)
-      .map(toSnakeRecordExport);
+    // 9. Backfill contentHash for records that lack it (migration for existing data)
+    for (const item of filteredMerged) {
+      if (!item.contentHash && item.type !== 'image' && item.content) {
+        item.contentHash = await computeContentHashExport(item.type || 'text', item.content);
+      }
+    }
 
-    const newData = { version: 1, app: 'ClipStash', records: uploadRecords };
+    // Add loser IDs from contentHash dedup to deleted_ids
+    for (const loserId of mergedLoserIds) {
+      const existing = deletedMap.get(loserId);
+      if (!existing || now > (existing.deleted_at || 0)) {
+        deletedMap.set(loserId, { id: loserId, deleted_at: now });
+      }
+    }
+    // Compute final deleted_ids list (including loser IDs, pruning expired)
+    const finalDeletedIds = [...deletedMap.values()]
+      .filter(e => (now - (e.deleted_at || 0)) < DELETED_IDS_TTL_MS);
+
+    // 10. Push: upload merged data
+    // For image records in data.json, only include image_hash (not image_data_url)
+    // Sort to match display order: pinned first (by pinnedAt desc), then by createdAt desc
+    const uploadRecords = filteredMerged
+      .filter(item => !item.deletedAt)
+      .filter(item => {
+        // Exclude images if sync images is off
+        if (item.type === 'image' && !syncImages) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        if (a.pinned && b.pinned) return (b.pinnedAt || 0) - (a.pinnedAt || 0);
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      })
+      .map(item => {
+        const exported = toSnakeRecordExport(item);
+        // For image records in sync data, strip the full data URL — only keep hash reference
+        if (item.type === 'image') {
+          delete exported.image_data_url;
+        }
+        return exported;
+      });
+
+    const newData = { version: SYNC_DATA_V2, app: 'ClipStash', records: uploadRecords };
     const newMeta = {
-      version: 1,
+      version: SYNC_DATA_V2,
       last_sync_at: now,
       record_count: uploadRecords.length,
-      deleted_ids: combinedDeletedIds,
+      deleted_ids: finalDeletedIds,
+      ...(syncImages ? { image_index: newImageIndex } : {}),
     };
 
-    await updateGist(
-      token,
-      gistId,
-      JSON.stringify(newData, null, 2),
-      JSON.stringify(newMeta, null, 2)
-    );
+    // Serialize: v2 encrypted+compressed if password set, else plain JSON
+    const dataStr = await serializeGistContent(newData, syncPassword);
+    const metaStr = await serializeGistContent(newMeta, syncPassword);
 
-    // 9. Clear pending lists after successful push
+    // Build combined files map: data + meta + image files
+    const allFiles = {
+      [GIST_DATA_FILE]: dataStr,
+      [GIST_META_FILE]: metaStr,
+      ...imageFilesToUpload,
+    };
+
+    await updateGistFiles(token, gistId, allFiles);
+
+    // 11. Clear pending lists after successful push
     await clearPendingDeleted();
     await clearPendingRestored();
 
-    console.log(`[Sync] Pushed: pulled=${pulled}, pushed=${pushed}, conflicts=${conflicts}, localUpdated=${localUpdated}, softDeleted=${softDeletedCount}`);
+    console.log(`[Sync] Pushed: pulled=${pulled}, pushed=${pushed}, conflicts=${conflicts}, localUpdated=${localUpdated}, deduplicated=${deduplicated}, softDeleted=${softDeletedCount}, imgPulled=${imagePulled}, imgUploaded=${Object.keys(imageFilesToUpload).filter(k => imageFilesToUpload[k] !== null).length}`);
   } else {
     console.log('[Sync] No changes detected, skipping push');
   }
 
-  // 10. Update last sync timestamp
+  // 12. Update last sync timestamp
   settings.lastSyncAt = now;
   await saveSyncSettings(settings);
 
-  return { pulled, pushed, updated: conflicts, deleted: softDeletedCount };
+  return { pulled: pulled + imagePulled, pushed, updated: conflicts, deleted: softDeletedCount };
 }
 
 /**
@@ -448,7 +738,7 @@ export async function performSync() {
  * @returns {Promise<void>}
  */
 export async function disconnectSync() {
-  await saveSyncSettings({ token: '', gistId: '', enabled: false, lastSyncAt: 0 });
+  await saveSyncSettings({ token: '', gistId: '', enabled: false, lastSyncAt: 0, syncPassword: '', syncImages: false });
 }
 
 /**
@@ -462,8 +752,10 @@ export function formatSyncTime(ts, neverText = 'never') {
 
   const now = Date.now();
   const diff = now - ts;
+  const seconds = Math.floor(diff / 1000);
 
-  if (diff < 60000) return '< 1m ago';
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
 

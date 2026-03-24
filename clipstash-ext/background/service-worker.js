@@ -1,6 +1,6 @@
 // ClipStash - Service Worker (icon click, shortcut, context menu, periodic sync)
 
-import { addCache } from '../utils/storage.js';
+import { addCache, migrateContentHash } from '../utils/storage.js';
 import { readClipboardViaScript, readClipboardViaOffscreen } from '../utils/clipboard.js';
 import { getSyncSettings, performSync } from '../utils/sync.js';
 import { SYNC_PERIODIC_PULL_INTERVAL } from '../utils/constants.js';
@@ -24,40 +24,7 @@ async function showBadge(text, color, duration = 1500) {
 }
 
 // ===== Popup =====
-
-/**
- * openPopup opens the popup page via temporary popup assignment
- */
-async function openPopup() {
-  try {
-    await chrome.action.setPopup({ popup: 'popup/popup.html' });
-    await chrome.action.openPopup();
-    setTimeout(async () => {
-      await chrome.action.setPopup({ popup: '' });
-    }, 500);
-  } catch {
-    // chrome.action.openPopup() may fail in certain contexts;
-    // keep popup assigned so next icon click opens it normally
-    console.warn('[ClipStash] openPopup failed, popup will open on next click');
-  }
-}
-
-/**
- * openPopupWithAction opens the popup and sends an action message to it
- * @param {string} action
- */
-async function openPopupWithAction(action) {
-  try {
-    await chrome.action.setPopup({ popup: 'popup/popup.html' });
-    await chrome.action.openPopup();
-    setTimeout(async () => {
-      await chrome.action.setPopup({ popup: '' });
-      chrome.runtime.sendMessage({ action });
-    }, 300);
-  } catch {
-    console.warn('[ClipStash] openPopupWithAction failed');
-  }
-}
+// Popup is managed by manifest.json default_popup — no dynamic logic needed.
 
 // ===== Clipboard Cache =====
 
@@ -119,6 +86,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
   // Set up periodic sync alarm
   setupSyncAlarm();
+  // Backfill contentHash for existing records that lack it (one-time migration)
+  migrateContentHash().then((count) => {
+    if (count > 0) {
+      console.log(`[ClipStash] Migrated contentHash for ${count} existing records`);
+    }
+  });
 });
 
 // ===== Periodic Sync via chrome.alarms =====
@@ -171,14 +144,16 @@ setupSyncAlarm();
 
 chrome.contextMenus.onClicked.addListener(async (info) => {
   if (info.menuItemId === 'open-settings') {
-    await openPopupWithAction('open-settings');
+    // Send action to the popup (which opens via default_popup on icon click)
+    chrome.runtime.sendMessage({ action: 'open-settings' }).catch(() => {
+      // Popup may not be open yet — ignore
+    });
   }
 });
 
 // ===== Event Listeners =====
 
-// Icon click — always open popup
-chrome.action.onClicked.addListener(() => openPopup());
+// Popup is opened via default_popup in manifest — no onClicked listener needed
 
 // Keyboard shortcut — always cache clipboard
 chrome.commands.onCommand.addListener(async (command) => {

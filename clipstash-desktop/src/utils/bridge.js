@@ -206,8 +206,8 @@ export async function initCloudSync(token) {
   return await invoke('init_cloud_sync', { token });
 }
 
-export async function performCloudSync() {
-  return await invoke('perform_cloud_sync');
+export async function performCloudSync(options = {}) {
+  return await invoke('perform_cloud_sync', { forcePush: options.forcePush || false });
 }
 
 export async function disconnectCloudSync() {

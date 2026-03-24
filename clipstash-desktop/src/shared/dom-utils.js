@@ -348,3 +348,30 @@ export function formatFullTime(timestamp) {
   const s = String(date.getSeconds()).padStart(2, '0');
   return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }
+
+// ===== Adaptive Refresh Interval =====
+
+/**
+ * getAdaptiveRefreshInterval returns the refresh interval (ms) for relative-time
+ * displays based on the newest visible timestamp. The newest card changes fastest,
+ * so it drives the refresh frequency.
+ *
+ * Strategy:
+ *  - age < 1min  → 5s   (fast — "just now" / "Xs ago" changes rapidly)
+ *  - age < 1h    → 30s  (medium — "Xm ago" changes every minute)
+ *  - age < 1d    → 5min (slow — "Xh ago" changes every hour)
+ *  - age < 30d   → 1h   (very slow — "Xd ago" changes daily)
+ *  - age >= 30d  → 0    (stop — displays fixed "YYYY-MM-DD")
+ *
+ * @param {number} newestTimestamp - the most recent timestamp among visible items (ms)
+ * @returns {number} interval in ms, or 0 to stop refreshing
+ */
+export function getAdaptiveRefreshInterval(newestTimestamp) {
+  if (!newestTimestamp || newestTimestamp <= 0) return 0;
+  const age = Date.now() - newestTimestamp;
+  if (age < 60 * 1000) return 5 * 1000;           // < 1min → 5s
+  if (age < 60 * 60 * 1000) return 30 * 1000;     // < 1h   → 30s
+  if (age < 24 * 60 * 60 * 1000) return 5 * 60 * 1000; // < 1d → 5min
+  if (age < 30 * 24 * 60 * 60 * 1000) return 60 * 60 * 1000; // < 30d → 1h
+  return 0; // >= 30d — fixed date, no refresh needed
+}

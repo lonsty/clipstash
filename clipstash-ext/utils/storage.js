@@ -42,13 +42,50 @@ function notifyChange(action, detail) {
 }
 
 /**
- * generateId generates a unique identifier
- * @returns {string} format: timestamp_randomHex
+ * generateId generates a random identifier (10 hex chars = 5 bytes)
+ * @returns {string} e.g. "a3f7e2b14c"
  */
 function generateId() {
-  const ts = Date.now();
-  const rand = Math.random().toString(16).slice(2, 10);
-  return `${ts}_${rand}`;
+  const arr = new Uint8Array(5);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * generateUniqueId generates a collision-free ID against an existing set
+ * @param {Set<string>|Array<string>} existingIds - IDs already in use
+ * @returns {string} a unique 10 hex char ID
+ */
+function generateUniqueId(existingIds) {
+  const ids = existingIds instanceof Set ? existingIds : new Set(existingIds);
+  let id = generateId();
+  while (ids.has(id)) {
+    id = generateId();
+  }
+  return id;
+}
+
+/**
+ * computeContentHash calculates a short SHA-256 based hash for content dedup.
+ * For text/html records: hash(type + content), first 16 hex chars (8 bytes).
+ * For image records: reuses imageHash directly.
+ * @param {string} type - 'text' | 'html' | 'image'
+ * @param {string} content - text content
+ * @param {string} [imageHash] - pre-computed image hash
+ * @returns {Promise<string>} 16-char hex hash, or empty string if no content
+ */
+async function computeContentHash(type, content, imageHash) {
+  if (type === 'image') {
+    return imageHash || '';
+  }
+  if (!content) return '';
+  const data = new TextEncoder().encode(`${type}\0${content}`);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = new Uint8Array(hashBuffer);
+  // Take first 8 bytes → 16 hex chars (collision probability ~1 in 2^64)
+  return Array.from(hashArray.slice(0, 8))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 // ===== Settings =====
@@ -209,10 +246,14 @@ export async function addCache(data) {
 
     const settings = await getSettings();
 
+    const contentHash = await computeContentHash(type, content, imageHash);
+
+    const existingIds = activeCaches.map(item => item.id);
     const newItem = {
-      id: generateId(),
+      id: generateUniqueId(existingIds),
       type,
       content,
+      contentHash,
       createdAt: Date.now(),
       contentLength: type === 'image' ? 0 : [...content].length,
       tags: [],
@@ -544,6 +585,7 @@ export async function updateCacheContent(id, content) {
     if (!item) return false;
     item.content = content;
     item.contentLength = [...content].length;
+    item.contentHash = await computeContentHash(item.type || 'text', content);
     item.updatedAt = Date.now();
     await chrome.storage.local.set({ [STORAGE_KEY]: caches });
     notifyChange('updateContent', { id });
@@ -660,11 +702,14 @@ function toSnakeRecord(rec) {
     content: rec.content,
     created_at: rec.createdAt,
     updated_at: rec.updatedAt,
-    content_length: rec.contentLength,
-    tags: rec.tags,
-    pinned: rec.pinned,
-    pinned_at: rec.pinnedAt
   };
+  if (rec.contentHash) out.content_hash = rec.contentHash;
+  // Conditionally omit default/empty fields to reduce payload size
+  if (Array.isArray(rec.tags) && rec.tags.length > 0) out.tags = rec.tags;
+  if (rec.pinned) {
+    out.pinned = true;
+    out.pinned_at = rec.pinnedAt || 0;
+  }
   if (rec.htmlContent) out.html_content = rec.htmlContent;
   if (rec.imageDataUrl) out.image_data_url = rec.imageDataUrl;
   if (rec.imageHash) out.image_hash = rec.imageHash;
@@ -686,11 +731,12 @@ function fromSnakeRecord(rec) {
     content,
     createdAt,
     updatedAt: rec.updated_at || createdAt,
-    contentLength: rec.content_length || (content ? [...content].length : 0),
+    contentLength: content ? [...content].length : 0,
     tags: Array.isArray(rec.tags) ? rec.tags : [],
     pinned: !!rec.pinned,
     pinnedAt: rec.pinned_at || 0
   };
+  if (rec.content_hash) out.contentHash = rec.content_hash;
   if (rec.html_content) out.htmlContent = rec.html_content;
   if (rec.image_data_url) out.imageDataUrl = rec.image_data_url;
   if (rec.image_hash) out.imageHash = rec.image_hash;
@@ -724,6 +770,48 @@ export { toSnakeRecord as toSnakeRecordExport };
  * fromSnakeRecordImport imports a record from snake_case format (used by sync)
  */
 export { fromSnakeRecord as fromSnakeRecordImport };
+
+/**
+ * computeContentHashExport computes a content hash (used by sync for migration)
+ */
+export { computeContentHash as computeContentHashExport };
+
+/**
+ * migrateContentHash backfills contentHash for existing records that lack it.
+ * Should be called once on extension install/update. Skips records that already
+ * have a contentHash. Safe to call multiple times (idempotent).
+ * @returns {Promise<number>} number of records migrated
+ */
+export async function migrateContentHash() {
+  try {
+    const data = await chrome.storage.local.get(STORAGE_KEY);
+    const caches = data[STORAGE_KEY] || [];
+    let migrated = 0;
+
+    for (const item of caches) {
+      if (item.contentHash) continue;
+      if (item.type === 'image') {
+        if (item.imageHash) {
+          item.contentHash = item.imageHash;
+          migrated++;
+        }
+        continue;
+      }
+      if (!item.content) continue;
+      item.contentHash = await computeContentHash(item.type || 'text', item.content);
+      if (item.contentHash) migrated++;
+    }
+
+    if (migrated > 0) {
+      await chrome.storage.local.set({ [STORAGE_KEY]: caches });
+      console.log(`[Storage] Migrated contentHash for ${migrated} records`);
+    }
+    return migrated;
+  } catch (error) {
+    console.error('[Storage] Failed to migrate contentHash:', error);
+    return 0;
+  }
+}
 
 // ===== Pending Deleted IDs (for sync propagation) =====
 

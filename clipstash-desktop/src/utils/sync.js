@@ -19,6 +19,7 @@ export async function getSyncSettings() {
       enabled: false,
       lastSyncAt: 0,
       autoSync: true,
+      syncPassword: '',
     };
   }
 }
@@ -35,8 +36,8 @@ export async function initSync(token) {
   return await bridgeInitSync(token);
 }
 
-export async function performSync() {
-  return await bridgePerformSync();
+export async function performSync(options = {}) {
+  return await bridgePerformSync(options);
 }
 
 export async function disconnectSync() {

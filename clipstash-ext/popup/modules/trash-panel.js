@@ -147,7 +147,7 @@ async function renderTrashPanel() {
         <div class="trash-item__meta">
           <span class="trash-item__countdown">${t('trashDaysLeft', { n: daysLeft })}</span>
           <span>${metaText}</span>
-          <span>${formatRelativeTime(item.createdAt)}</span>
+          <span data-relative-time="${item.createdAt}">${formatRelativeTime(item.createdAt)}</span>
         </div>
       </div>
       <div class="trash-item__actions">
