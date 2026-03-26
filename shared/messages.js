@@ -161,7 +161,7 @@ const BASE_MESSAGES = {
     syncSetupHintNoPassword: 'Set a sync password in Settings to enable sync',
     // Image Sync
     settingSyncImages: 'Sync Images',
-    settingSyncImagesDesc: 'Include images in cloud sync',
+    settingSyncImagesDesc: 'Upload images to cloud sync',
     syncImageTooLarge: 'Image too large ({size}). Max {max} per image',
     syncImageQuotaExceeded: 'Image sync quota exceeded ({used}/{max})',
     // Force Push (password wrong recovery)
@@ -326,7 +326,7 @@ const BASE_MESSAGES = {
     syncSetupHintNoPassword: '在设置中设置同步密码以启用同步',
     // Image Sync
     settingSyncImages: '同步图片',
-    settingSyncImagesDesc: '将图片纳入云端同步',
+    settingSyncImagesDesc: '将图片上传到云端同步',
     syncImageTooLarge: '图片过大（{size}），单张上限 {max}',
     syncImageQuotaExceeded: '图片同步配额已满（{used}/{max}）',
     // Force Push (password wrong recovery)

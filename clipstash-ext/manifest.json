@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipStash",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Clipboard cache — stash clipboard content with one click, revisit anytime",
   "permissions": [
     "activeTab",
@@ -50,9 +50,7 @@
         "fullscreen/fullscreen.js",
         "popup/popup.css",
         "popup/modules/*.js",
-        "vendor/highlight.min.js",
-        "vendor/hljs-light.css",
-        "vendor/hljs-dark.css",
+        "vendor/cm6.min.js",
         "utils/storage.js",
         "utils/constants.js",
         "utils/time.js",
@@ -62,6 +60,8 @@
         "shared/icons.js",
         "shared/messages.js",
         "shared/dom-utils.js",
+        "shared/cm6-editor.js",
+        "shared/cm6-loader.js",
         "shared/fullscreen-controller.js",
         "shared/crypto.js",
         "icons/icon128.png"

@@ -53,7 +53,8 @@ const confirm = createConfirmController({
 // ===== Theme =====
 
 async function applyTheme(theme) {
-  applyThemeToDocument(theme, '../vendor');
+  applyThemeToDocument(theme);
+  await refreshList();
 }
 
 // ===== List Rendering =====
@@ -384,6 +385,9 @@ async function init() {
 
   // Kick off adaptive relative-time refresh
   scheduleTimeRefresh();
+
+  // Re-render cards once CM6 finishes lazy-loading (enables syntax highlighting)
+  window.addEventListener('cm6-ready', () => refreshList(), { once: true });
 }
 
 init();

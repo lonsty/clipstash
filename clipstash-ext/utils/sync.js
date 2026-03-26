@@ -13,19 +13,15 @@ import {
   clearPendingRestored,
 } from './storage.js';
 import { packSyncData, unpackSyncData, encryptToken, decryptToken } from '../shared/crypto.js';
-import { DEFAULT_AUTO_SYNC, DEFAULT_SYNC_IMAGES } from '../shared/constants.js';
+import {
+  DEFAULT_AUTO_SYNC, DEFAULT_SYNC_IMAGES,
+  GIST_DATA_FILE, GIST_META_FILE, GIST_DESCRIPTION,
+  SYNC_SETTINGS_KEY, SYNC_IMAGE_MAX_BYTES, SYNC_IMAGE_TOTAL_MAX_BYTES,
+  DELETED_IDS_TTL_MS,
+} from '../shared/constants.js';
 
-const GIST_DATA_FILE = 'clipstash-data.json';
-const GIST_META_FILE = 'clipstash-meta.json';
 const GIST_IMAGE_PREFIX = 'clipstash-img-';
-const GIST_DESCRIPTION = 'ClipStash Cloud Sync Data (do not delete)';
 const API_BASE = 'https://api.github.com';
-const SYNC_SETTINGS_KEY = 'clipstash-sync';
-const SYNC_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB per image
-const SYNC_IMAGE_TOTAL_MAX_BYTES = 50 * 1024 * 1024; // 50 MB total quota
-
-// 30 days in ms — deleted_ids entries older than this are pruned
-const DELETED_IDS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ===== Sync Settings Persistence =====
 
@@ -479,6 +475,7 @@ export async function performSync(options = {}) {
       const parsed = await parseGistContent(files[GIST_META_FILE], syncPassword);
       remoteDeletedIds = parsed.deleted_ids || [];
       remoteImageIndex = parsed.image_index || {};
+      console.log(`[Sync] Remote meta: ${remoteDeletedIds.length} deleted_ids, ${Object.keys(remoteImageIndex).length} image_index entries, syncImages=${syncImages}`);
     } catch {
       // Meta-only failure is tolerable
       remoteDeletedIds = [];
@@ -534,46 +531,48 @@ export async function performSync(options = {}) {
   let newImageIndex = { ...remoteImageIndex };
   let imagePulled = 0;
 
-  if (syncImages) {
-    // Collect all active image records and their hashes
-    const activeImages = filteredMerged.filter(item => item.type === 'image' && !item.deletedAt);
-    const activeImageHashes = new Set();
+  // 5a. Image PULL: always download cloud images for active records (regardless of syncImages)
+  const activeImages = filteredMerged.filter(item => item.type === 'image' && !item.deletedAt);
+  const activeImageHashes = new Set();
 
-    for (const img of activeImages) {
-      if (!img.imageHash) continue;
-      activeImageHashes.add(img.imageHash);
+  for (const img of activeImages) {
+    if (!img.imageHash) continue;
+    activeImageHashes.add(img.imageHash);
 
-      // On-demand PULL: image record exists but has no local data — download from Gist
-      if (!img.imageDataUrl) {
-        const imgFileName = buildImageFileName(img.imageHash);
-        if (files[imgFileName]) {
-          try {
-            const imgData = await parseGistContent(files[imgFileName], syncPassword);
-            if (imgData.image_data_url) {
-              img.imageDataUrl = imgData.image_data_url;
-              img.content = ''; // image records use imageDataUrl, not content
-              imagePulled++;
-            }
-          } catch {
-            console.warn(`[Sync] Failed to parse image file: ${imgFileName}`);
+    // On-demand PULL: image record exists but has no local data — download from Gist
+    if (!img.imageDataUrl) {
+      const imgFileName = buildImageFileName(img.imageHash);
+      if (files[imgFileName]) {
+        try {
+          const imgData = await parseGistContent(files[imgFileName], syncPassword);
+          if (imgData.image_data_url) {
+            img.imageDataUrl = imgData.image_data_url;
+            img.content = '';
+            imagePulled++;
           }
+        } catch {
+          console.warn(`[Sync] Failed to parse image file: ${imgFileName}`);
         }
       }
+    }
+  }
 
-      // Incremental PUSH: local image has data but not yet in remote image index
-      if (img.imageDataUrl && !remoteImageIndex[img.imageHash]) {
-        // Enforce per-image size limit
-        const imageSize = img.imageDataUrl.length;
-        if (imageSize > SYNC_IMAGE_MAX_BYTES) {
-          console.warn(`[Sync] Image ${img.imageHash} exceeds size limit (${formatBytes(imageSize)} > ${formatBytes(SYNC_IMAGE_MAX_BYTES)}), skipping`);
-          continue;
-        }
+  // 5b. Image PUSH: only upload when syncImages is enabled
+  if (syncImages) {
+    for (const img of activeImages) {
+      if (!img.imageHash || !img.imageDataUrl) continue;
+      if (remoteImageIndex[img.imageHash]) continue;
 
-        const imgPayload = { image_data_url: img.imageDataUrl };
-        const imgContent = await serializeGistContent(imgPayload, syncPassword);
-        imageFilesToUpload[buildImageFileName(img.imageHash)] = imgContent;
-        newImageIndex[img.imageHash] = { uploaded_at: now, size: imageSize };
+      const imageSize = img.imageDataUrl.length;
+      if (imageSize > SYNC_IMAGE_MAX_BYTES) {
+        console.warn(`[Sync] Image ${img.imageHash} exceeds size limit (${formatBytes(imageSize)} > ${formatBytes(SYNC_IMAGE_MAX_BYTES)}), skipping`);
+        continue;
       }
+
+      const imgPayload = { image_data_url: img.imageDataUrl };
+      const imgContent = await serializeGistContent(imgPayload, syncPassword);
+      imageFilesToUpload[buildImageFileName(img.imageHash)] = imgContent;
+      newImageIndex[img.imageHash] = { uploaded_at: now, size: imageSize };
     }
 
     // Enforce total image quota
@@ -584,7 +583,6 @@ export async function performSync(options = {}) {
     if (totalSize > SYNC_IMAGE_TOTAL_MAX_BYTES) {
       console.warn(`[Sync] Image quota exceeded (${formatBytes(totalSize)} > ${formatBytes(SYNC_IMAGE_TOTAL_MAX_BYTES)}), skipping new image uploads`);
       imageFilesToUpload = {};
-      // Revert newly added entries
       for (const hash of Object.keys(newImageIndex)) {
         if (!remoteImageIndex[hash]) {
           delete newImageIndex[hash];
@@ -595,7 +593,6 @@ export async function performSync(options = {}) {
     // Clean up orphaned image entries (images whose records are deleted)
     for (const hash of Object.keys(newImageIndex)) {
       if (!activeImageHashes.has(hash)) {
-        // Mark for deletion from Gist (null = delete file)
         imageFilesToUpload[buildImageFileName(hash)] = null;
         delete newImageIndex[hash];
       }
@@ -685,7 +682,7 @@ export async function performSync(options = {}) {
       last_sync_at: now,
       record_count: uploadRecords.length,
       deleted_ids: finalDeletedIds,
-      ...(syncImages ? { image_index: newImageIndex } : {}),
+      image_index: newImageIndex,
     };
 
     const dataStr = await serializeGistContent(newData, syncPassword);

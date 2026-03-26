@@ -61,7 +61,8 @@ const confirm = createConfirmController({
 // ===== Theme =====
 
 async function applyTheme(theme) {
-  applyThemeToDocument(theme, 'vendor');
+  applyThemeToDocument(theme);
+  await refreshList();
 }
 
 // ===== List Rendering =====
@@ -356,8 +357,11 @@ async function init() {
   const theme = await getTheme();
   await applyTheme(theme);
 
-  // Purge expired soft-deleted records on startup
+  // Purge expired soft-deleted records on startup + periodically (every hour)
   await purgeExpiredCaches(TRASH_TTL_MS).catch(() => {});
+  setInterval(() => {
+    purgeExpiredCaches(TRASH_TTL_MS).catch(() => {});
+  }, 60 * 60 * 1000);
 
   // Initialize modules
   const sharedCallbacks = {
@@ -397,6 +401,9 @@ async function init() {
 
   // Kick off adaptive relative-time refresh
   scheduleTimeRefresh();
+
+  // Re-render cards once CM6 finishes lazy-loading (enables syntax highlighting)
+  window.addEventListener('cm6-ready', () => refreshList(), { once: true });
 
   info('Main window initialized');
 }

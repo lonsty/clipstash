@@ -10,6 +10,13 @@ SRC="$SCRIPT_DIR/shared"
 DEST_DESKTOP="$SCRIPT_DIR/clipstash-desktop/src/shared"
 
 echo "Syncing shared/ -> clipstash-desktop/src/shared/"
-rsync -av --delete "$SRC/" "$DEST_DESKTOP/"
+rsync -av --delete \
+  --exclude='vendor/' \
+  --exclude='node_modules/' \
+  --exclude='package.json' \
+  --exclude='package-lock.json' \
+  --exclude='build-cm6.mjs' \
+  --exclude='cm6-bundle.js' \
+  "$SRC/" "$DEST_DESKTOP/"
 
 echo "Done."

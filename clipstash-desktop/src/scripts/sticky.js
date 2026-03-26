@@ -5,9 +5,8 @@
 import { getSettings, getTheme } from '../utils/storage.js';
 import { initLang, t } from '../utils/i18n.js';
 import { writeClipboard, getCacheById } from '../utils/bridge.js';
-import { ICON_COPY, ICON_CHECK } from '../shared/icons.js';
-import { highlightCode, applyThemeToDocument } from '../shared/dom-utils.js';
-import { COPY_FEEDBACK_DURATION } from '../shared/constants.js';
+import { highlightCode, applyThemeToDocument, sanitizeHtml, showCopyFeedback } from '../shared/dom-utils.js';
+import { ensureCM6 } from '../shared/cm6-loader.js';
 
 // ===== DOM References =====
 
@@ -20,15 +19,6 @@ let currentItem = null;
 
 // ===== Copy =====
 
-function showCopyFeedback() {
-  btnCopy.innerHTML = ICON_CHECK;
-  btnCopy.classList.add('copied');
-  setTimeout(() => {
-    btnCopy.innerHTML = ICON_COPY;
-    btnCopy.classList.remove('copied');
-  }, COPY_FEEDBACK_DURATION);
-}
-
 async function copyToClipboard() {
   if (!currentItem) return;
   try {
@@ -38,11 +28,11 @@ async function copyToClipboard() {
       currentItem.htmlContent || null,
       currentItem.imageDataUrl || null
     );
-    showCopyFeedback();
+    showCopyFeedback(btnCopy, t);
   } catch {
     try {
       await navigator.clipboard.writeText(currentItem.content || '');
-      showCopyFeedback();
+      showCopyFeedback(btnCopy, t);
     } catch {
       // Silent fail
     }
@@ -64,18 +54,14 @@ function renderContent(item) {
     wrap.appendChild(img);
     stickyContent.appendChild(wrap);
   } else if (type === 'html' && item.htmlContent) {
-    // Sanitize HTML content: neutralize script tags
-    const sanitized = item.htmlContent
-      .replace(/<script[\s>]/gi, '&lt;script ')
-      .replace(/<\/script>/gi, '&lt;/script&gt;');
-    stickyContent.innerHTML = `<div class="content-html">${sanitized}</div>`;
+    stickyContent.innerHTML = `<div class="content-html">${sanitizeHtml(item.htmlContent)}</div>`;
   } else {
     const pre = document.createElement('pre');
     pre.className = 'content-text';
     const code = document.createElement('code');
     if (item.language) {
       code.innerHTML = highlightCode(item.content || '', item.language);
-      code.className = 'hljs';
+      code.className = '';
     } else {
       code.textContent = item.content || '';
     }
@@ -105,7 +91,7 @@ async function init() {
   initLang(settings.language || 'en');
 
   const theme = await getTheme();
-  applyThemeToDocument(theme, 'vendor');
+  applyThemeToDocument(theme);
 
   // Update copy button title with i18n
   btnCopy.title = t('copy');
@@ -124,6 +110,11 @@ async function init() {
   }
 
   renderContent(currentItem);
+
+  // Lazy-load CM6 and re-render with syntax highlighting once ready
+  ensureCM6().then((cm6) => {
+    if (cm6 && currentItem) renderContent(currentItem);
+  });
 }
 
 init();

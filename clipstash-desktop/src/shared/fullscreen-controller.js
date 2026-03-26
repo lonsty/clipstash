@@ -8,12 +8,14 @@ import {
   createConfirmController,
 } from './dom-utils.js';
 import { MAX_TAG_LENGTH } from './constants.js';
+import { createCM6Editor } from './cm6-editor.js';
 
 // ===== Module State =====
 
 let currentItem = null;
 let isEditMode = false;
 let hasUnsavedChanges = false;
+let cm6Instance = null;
 
 // ===== DOM References =====
 
@@ -25,9 +27,6 @@ const fsBody = document.querySelector('.fs-body');
 const fsContent = document.getElementById('fs-content');
 const fsCode = document.getElementById('fs-code');
 const fsEditorContainer = document.getElementById('fs-editor-container');
-const fsEditor = document.getElementById('fs-editor');
-const fsEditorPreview = document.getElementById('fs-editor-preview');
-const fsEditorCode = document.getElementById('fs-editor-code');
 const fsImageWrap = document.getElementById('fs-image-wrap');
 const fsImage = document.getElementById('fs-image');
 const fsHtmlWrap = document.getElementById('fs-html-wrap');
@@ -218,18 +217,10 @@ async function addTagToItem(tagName) {
 
 // ===== Edit Mode =====
 
-function enterEditMode() {
+async function enterEditMode() {
   if (!currentItem || isEditMode) return;
   isEditMode = true;
   hasUnsavedChanges = false;
-
-  const viewHeight = fsContent.offsetHeight || fsHtmlWrap.offsetHeight || 80;
-
-  fsEditor.value = currentItem.content || '';
-  fsEditor.style.height = 'auto';
-  const contentHeight = fsEditor.scrollHeight;
-  const editorHeight = Math.max(viewHeight, contentHeight, 80);
-  fsEditor.style.height = `${editorHeight}px`;
 
   fsContent.style.display = 'none';
   fsHtmlWrap.style.display = 'none';
@@ -241,13 +232,28 @@ function enterEditMode() {
   fsHeaderLeft.style.display = 'none';
   fsHeaderActions.style.display = 'none';
 
-  updateEditorHighlight();
+  if (cm6Instance) {
+    cm6Instance.destroy();
+    cm6Instance = null;
+  }
+  fsEditorContainer.innerHTML = '';
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (document.documentElement.getAttribute('data-theme') === 'system' &&
+     window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  cm6Instance = await createCM6Editor(fsEditorContainer, {
+    content: currentItem.content || '',
+    language: currentItem.language || '',
+    dark: isDark,
+    onChange: () => { hasUnsavedChanges = true; },
+  });
 }
 
 async function saveEdit() {
-  if (!currentItem || !isEditMode) return;
+  if (!currentItem || !isEditMode || !cm6Instance) return;
 
-  const newContent = fsEditor.value;
+  const newContent = cm6Instance.getContent();
   await updateCacheContentFn(currentItem.id, newContent);
   currentItem.content = newContent;
   currentItem.contentLength = [...newContent].length;
@@ -256,10 +262,8 @@ async function saveEdit() {
   const lang = currentItem.language;
   if (lang) {
     fsCode.innerHTML = highlightCode(newContent, lang);
-    fsCode.className = 'hljs';
   } else {
     fsCode.textContent = newContent;
-    fsCode.className = '';
   }
   fsContent.style.display = 'block';
 
@@ -279,17 +283,14 @@ function cancelEdit() {
     fsHtmlWrap.style.display = 'block';
     if (currentItem.content) {
       fsCode.textContent = currentItem.content;
-      fsCode.className = '';
       fsContent.style.display = 'block';
     }
   } else {
     const lang = currentItem.language;
     if (lang) {
       fsCode.innerHTML = highlightCode(currentItem.content || '', lang);
-      fsCode.className = 'hljs';
     } else {
       fsCode.textContent = currentItem.content;
-      fsCode.className = '';
     }
     fsContent.style.display = 'block';
   }
@@ -298,31 +299,16 @@ function cancelEdit() {
 function exitEditMode() {
   isEditMode = false;
   hasUnsavedChanges = false;
+  if (cm6Instance) {
+    cm6Instance.destroy();
+    cm6Instance = null;
+  }
   fsEditorContainer.style.display = 'none';
-  fsEditor.classList.remove('has-highlight');
   fsEditorContainer.classList.remove('editing');
   fsBody.classList.remove('editing-mode');
   fsEditBar.style.display = 'none';
   fsHeaderLeft.style.display = '';
   fsHeaderActions.style.display = '';
-}
-
-function updateEditorHighlight() {
-  if (!isEditMode || !currentItem) return;
-
-  const lang = currentItem.language;
-  const content = fsEditor.value;
-
-  if (lang && typeof hljs !== 'undefined') {
-    fsEditor.classList.add('has-highlight');
-    const highlighted = highlightCode(content, lang);
-    fsEditorCode.innerHTML = highlighted;
-    fsEditorCode.className = 'hljs';
-  } else {
-    fsEditor.classList.add('has-highlight');
-    fsEditorCode.textContent = content;
-    fsEditorCode.className = '';
-  }
 }
 
 // ===== Event Listeners =====
@@ -358,22 +344,6 @@ function setupEventListeners() {
     }
   });
 
-  // Editor input: track changes + highlight + auto-resize
-  fsEditor.addEventListener('input', () => {
-    hasUnsavedChanges = true;
-    updateEditorHighlight();
-    fsEditor.style.height = 'auto';
-    fsEditor.style.height = `${Math.max(fsEditor.scrollHeight, 80)}px`;
-  });
-
-  // Sync scroll between editor and preview
-  fsEditor.addEventListener('scroll', () => {
-    if (fsEditorPreview) {
-      fsEditorPreview.scrollTop = fsEditor.scrollTop;
-      fsEditorPreview.scrollLeft = fsEditor.scrollLeft;
-    }
-  });
-
   // Language selector
   fsLangSelect.addEventListener('change', async () => {
     if (!currentItem) return;
@@ -381,12 +351,12 @@ function setupEventListeners() {
     await updateCacheLanguageFn(currentItem.id, lang);
     currentItem.language = lang;
     if (currentItem.type !== 'image' && currentItem.type !== 'html') {
-      if (lang) {
+      if (isEditMode && cm6Instance) {
+        cm6Instance.setLanguage(lang);
+      } else if (lang) {
         fsCode.innerHTML = highlightCode(currentItem.content || '', lang);
-        fsCode.className = 'hljs';
       } else {
         fsCode.textContent = currentItem.content;
-        fsCode.className = '';
       }
     }
   });

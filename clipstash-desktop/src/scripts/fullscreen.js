@@ -9,10 +9,11 @@ import {
 import { formatFullTime } from '../utils/time.js';
 import { writeClipboard, getCacheById } from '../utils/bridge.js';
 import {
-  showCopyFeedback, applyThemeToDocument,
+  showCopyFeedback, applyThemeToDocument, sanitizeHtml,
   applyI18n as sharedApplyI18n,
 } from '../shared/dom-utils.js';
 import { initFullscreen, renderContent } from '../shared/fullscreen-controller.js';
+import { ensureCM6 } from '../shared/cm6-loader.js';
 
 // ===== Platform-Specific: Clipboard =====
 
@@ -40,10 +41,6 @@ async function copyToClipboard(data, btnEl) {
 // ===== Platform-Specific: HTML Sanitization =====
 // Desktop does not bundle DOMPurify; render HTML directly.
 
-function desktopSanitizeHtml(html) {
-  return html;
-}
-
 // ===== Init =====
 
 async function init() {
@@ -60,14 +57,14 @@ async function init() {
   initLang(settings.language || 'en');
 
   const theme = await getTheme();
-  applyThemeToDocument(theme, 'vendor');
+  applyThemeToDocument(theme);
 
   // Initialize shared fullscreen controller
   initFullscreen({
     t,
     formatFullTime,
     copyToClipboard,
-    sanitizeHtml: desktopSanitizeHtml,
+    sanitizeHtml,
     updateCacheTags,
     updateCacheContent,
     updateCacheLanguage,
@@ -91,6 +88,11 @@ async function init() {
   // Apply i18n and render
   sharedApplyI18n(t, getLang);
   renderContent(currentItem);
+
+  // Lazy-load CM6 and re-render with syntax highlighting once ready
+  ensureCM6().then((cm6) => {
+    if (cm6) renderContent(currentItem);
+  });
 }
 
 init();

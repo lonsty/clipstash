@@ -1,11 +1,13 @@
 // ClipStash - Service Worker (icon click, shortcut, context menu, periodic sync)
 
-import { addCache } from '../utils/storage.js';
+import { addCache, purgeExpiredCaches } from '../utils/storage.js';
 import { readClipboardViaScript, readClipboardViaOffscreen } from '../utils/clipboard.js';
 import { getSyncSettings, performSync } from '../utils/sync.js';
-import { SYNC_PERIODIC_PULL_INTERVAL } from '../utils/constants.js';
+import { SYNC_PERIODIC_PULL_INTERVAL, TRASH_TTL_MS } from '../utils/constants.js';
 
 const SYNC_ALARM_NAME = 'clipstash-periodic-sync';
+const TRASH_PURGE_ALARM_NAME = 'clipstash-trash-purge';
+const TRASH_PURGE_INTERVAL_MINUTES = 360; // every 6 hours
 
 // ===== Badge =====
 
@@ -85,6 +87,7 @@ chrome.runtime.onInstalled.addListener(() => {
     contexts: ['action']
   });
   setupSyncAlarm();
+  setupTrashPurgeAlarm();
 });
 
 // ===== Periodic Sync via chrome.alarms =====
@@ -129,11 +132,24 @@ async function handlePeriodicSync() {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM_NAME) {
     handlePeriodicSync();
+  } else if (alarm.name === TRASH_PURGE_ALARM_NAME) {
+    purgeExpiredCaches(TRASH_TTL_MS).catch((err) => {
+      console.warn('[ClipStash] Trash purge failed:', err);
+    });
   }
 });
 
-// Re-check alarm on service worker startup
+// ===== Periodic Trash Purge via chrome.alarms =====
+
+function setupTrashPurgeAlarm() {
+  chrome.alarms.create(TRASH_PURGE_ALARM_NAME, {
+    periodInMinutes: TRASH_PURGE_INTERVAL_MINUTES,
+  });
+}
+
+// Re-check alarms on service worker startup
 setupSyncAlarm();
+setupTrashPurgeAlarm();
 
 chrome.contextMenus.onClicked.addListener(async (info) => {
   if (info.menuItemId === 'open-settings') {

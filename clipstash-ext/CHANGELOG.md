@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-26
+
+### Added
+
+- **CodeMirror 6 syntax highlighting** — replaced highlight.js with CodeMirror 6 for syntax highlighting and editing; supports 30 languages with GitHub-themed light/dark color schemes
+- **CM6 inline editor** — modal and fullscreen edit mode now uses a full CodeMirror 6 editor with line numbers, bracket matching, code folding, undo/redo, and search
+- **Lazy-loaded CM6 bundle** — CM6 (~1 MB) is loaded on-demand when first needed, keeping popup open instant
+- **Trash auto-purge** — expired trash items (>30 days) are automatically cleaned up via `chrome.alarms` every 6 hours
+
+### Changed
+
+- **Image sync logic** — "Sync Images" toggle now controls upload only; cloud images are always pulled regardless of the toggle setting
+- **Theme-aware highlights** — syntax highlighting automatically adapts when switching between light/dark themes
+
+### Removed
+
+- **highlight.js** — replaced by CodeMirror 6
+
 ## [0.2.0] - 2026-03-23
 
 ### Added

@@ -17,12 +17,14 @@ import {
   updateCacheTags, togglePin, updateCacheContent, updateCacheLanguage, getAllTags,
 } from '../../utils/storage.js';
 import { copyToClipboard } from './card-renderer.js';
+import { createCM6Editor } from '../../shared/cm6-editor.js';
 
 // ===== Module State =====
 
 let currentModalData = null;
 let isEditMode = false;
 let hasUnsavedChanges = false;
+let cm6Instance = null;
 
 // ===== DOM References =====
 
@@ -31,9 +33,6 @@ const modalBody = document.querySelector('.modal-body');
 const modalContent = document.getElementById('modal-content');
 const modalCode = document.getElementById('modal-code');
 const modalEditorContainer = document.getElementById('modal-editor-container');
-const modalEditor = document.getElementById('modal-editor');
-const modalEditorPreview = document.getElementById('modal-editor-preview');
-const modalEditorCode = document.getElementById('modal-editor-code');
 const modalImageWrap = document.getElementById('modal-image-wrap');
 const modalImage = document.getElementById('modal-image');
 const modalHtmlWrap = document.getElementById('modal-html-wrap');
@@ -110,22 +109,6 @@ export function initModal(callbacks) {
   });
   btnEditSave.addEventListener('click', saveEdit);
 
-  // Editor input: track changes + highlight + auto-resize
-  modalEditor.addEventListener('input', () => {
-    hasUnsavedChanges = true;
-    updateEditorHighlight();
-    modalEditor.style.height = 'auto';
-    modalEditor.style.height = `${Math.max(modalEditor.scrollHeight, 80)}px`;
-  });
-
-  // Sync scroll between editor and preview
-  modalEditor.addEventListener('scroll', () => {
-    if (modalEditorPreview) {
-      modalEditorPreview.scrollTop = modalEditor.scrollTop;
-      modalEditorPreview.scrollLeft = modalEditor.scrollLeft;
-    }
-  });
-
   // Language selector
   modalLangSelect.addEventListener('change', async () => {
     if (!currentModalData) return;
@@ -133,12 +116,12 @@ export function initModal(callbacks) {
     await updateCacheLanguage(currentModalData.id, lang);
     currentModalData.language = lang;
     if (currentModalData.type !== 'image' && currentModalData.type !== 'html') {
-      if (lang) {
+      if (isEditMode && cm6Instance) {
+        cm6Instance.setLanguage(lang);
+      } else if (lang) {
         modalCode.innerHTML = highlightCode(currentModalData.content || '', lang);
-        modalCode.className = 'hljs';
       } else {
         modalCode.textContent = currentModalData.content;
-        modalCode.className = '';
       }
     }
     await onRefresh();
@@ -222,10 +205,8 @@ export function openModal(item) {
   } else {
     if (item.language) {
       modalCode.innerHTML = highlightCode(item.content || '', item.language);
-      modalCode.className = 'hljs';
     } else {
       modalCode.textContent = item.content;
-      modalCode.className = '';
     }
     modalContent.style.display = 'block';
   }
@@ -265,8 +246,11 @@ function doCloseModal() {
   currentModalData = null;
   isEditMode = false;
   hasUnsavedChanges = false;
+  if (cm6Instance) {
+    cm6Instance.destroy();
+    cm6Instance = null;
+  }
   modalEditorContainer.style.display = 'none';
-  modalEditor.classList.remove('has-highlight');
   modalEditorContainer.classList.remove('editing');
   modalBody.classList.remove('editing-mode');
   modalEditBar.style.display = 'none';
@@ -360,17 +344,10 @@ async function addTagToCurrentItem(tagName) {
 
 // ===== Edit Mode =====
 
-function enterEditMode() {
+async function enterEditMode() {
   if (!currentModalData || currentModalData.type === 'image') return;
   isEditMode = true;
   hasUnsavedChanges = false;
-
-  const viewHeight = modalContent.offsetHeight || modalHtmlWrap.offsetHeight || 80;
-  modalEditor.value = currentModalData.content || '';
-  modalEditor.style.height = 'auto';
-  const contentHeight = modalEditor.scrollHeight;
-  const editorHeight = Math.max(viewHeight, contentHeight, 80);
-  modalEditor.style.height = `${editorHeight}px`;
 
   modalContent.style.display = 'none';
   modalHtmlWrap.style.display = 'none';
@@ -382,13 +359,29 @@ function enterEditMode() {
   modalHeaderId.style.display = 'none';
   modalHeaderActions.style.display = 'none';
 
-  updateEditorHighlight();
+  // Clear any old CM6 instance
+  if (cm6Instance) {
+    cm6Instance.destroy();
+    cm6Instance = null;
+  }
+  modalEditorContainer.innerHTML = '';
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark' ||
+    (document.documentElement.getAttribute('data-theme') === 'system' &&
+     window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+  cm6Instance = await createCM6Editor(modalEditorContainer, {
+    content: currentModalData.content || '',
+    language: currentModalData.language || '',
+    dark: isDark,
+    onChange: () => { hasUnsavedChanges = true; },
+  });
 }
 
 async function saveEdit() {
-  if (!currentModalData || !isEditMode) return;
+  if (!currentModalData || !isEditMode || !cm6Instance) return;
 
-  const newContent = modalEditor.value;
+  const newContent = cm6Instance.getContent();
   await updateCacheContent(currentModalData.id, newContent);
   currentModalData.content = newContent;
   currentModalData.contentLength = [...newContent].length;
@@ -397,10 +390,8 @@ async function saveEdit() {
   const lang = currentModalData.language;
   if (lang) {
     modalCode.innerHTML = highlightCode(newContent, lang);
-    modalCode.className = 'hljs';
   } else {
     modalCode.textContent = newContent;
-    modalCode.className = '';
   }
   modalContent.style.display = 'block';
 
@@ -423,17 +414,14 @@ function cancelEdit() {
     modalHtmlWrap.style.display = 'block';
     if (currentModalData.content) {
       modalCode.textContent = currentModalData.content;
-      modalCode.className = '';
       modalContent.style.display = 'block';
     }
   } else {
     const lang = currentModalData.language;
     if (lang) {
       modalCode.innerHTML = highlightCode(currentModalData.content || '', lang);
-      modalCode.className = 'hljs';
     } else {
       modalCode.textContent = currentModalData.content;
-      modalCode.className = '';
     }
     modalContent.style.display = 'block';
   }
@@ -442,30 +430,16 @@ function cancelEdit() {
 function exitEditMode() {
   isEditMode = false;
   hasUnsavedChanges = false;
+  if (cm6Instance) {
+    cm6Instance.destroy();
+    cm6Instance = null;
+  }
   modalEditorContainer.style.display = 'none';
-  modalEditor.classList.remove('has-highlight');
   modalEditorContainer.classList.remove('editing');
   modalBody.classList.remove('editing-mode');
   modalEditBar.style.display = 'none';
   modalHeaderId.style.display = '';
   modalHeaderActions.style.display = '';
-}
-
-function updateEditorHighlight() {
-  if (!isEditMode || !currentModalData) return;
-  const lang = currentModalData.language;
-  const content = modalEditor.value;
-
-  if (lang && typeof window.hljs !== 'undefined') {
-    modalEditor.classList.add('has-highlight');
-    const highlighted = highlightCode(content, lang);
-    modalEditorCode.innerHTML = highlighted;
-    modalEditorCode.className = 'hljs';
-  } else {
-    modalEditor.classList.add('has-highlight');
-    modalEditorCode.textContent = content;
-    modalEditorCode.className = '';
-  }
 }
 
 /**

@@ -9,9 +9,10 @@ import {
 import { formatFullTime } from '../utils/time.js';
 import {
   sanitizeHtml, showCopyFeedback, convertToPngBlob, applyThemeToDocument,
-  applyI18n as sharedApplyI18n,
+  applyI18n as sharedApplyI18n, highlightCode,
 } from '../shared/dom-utils.js';
 import { initFullscreen, renderContent } from '../shared/fullscreen-controller.js';
+import { ensureCM6 } from '../shared/cm6-loader.js';
 
 // ===== Platform-Specific: Clipboard =====
 
@@ -73,9 +74,9 @@ async function init() {
   // Load theme
   try {
     const theme = await getTheme();
-    applyThemeToDocument(theme, '../vendor');
+    applyThemeToDocument(theme);
   } catch {
-    applyThemeToDocument('system', '../vendor');
+    applyThemeToDocument('system');
   }
 
   // Initialize shared fullscreen controller
@@ -101,6 +102,11 @@ async function init() {
   // Apply i18n and render
   sharedApplyI18n(t, getLang);
   renderContent(currentItem);
+
+  // Lazy-load CM6 and re-render with syntax highlighting once ready
+  ensureCM6().then((cm6) => {
+    if (cm6) renderContent(currentItem);
+  });
 }
 
 init();

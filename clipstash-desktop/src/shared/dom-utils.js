@@ -6,6 +6,7 @@ import {
   TAG_HINT_DURATION,
   COPY_FEEDBACK_DURATION,
 } from './constants.js';
+import { ensureCM6, getCM6Sync } from './cm6-loader.js';
 
 /**
  * escapeHtml escapes HTML special characters in a string
@@ -19,17 +20,24 @@ export function escapeHtml(text) {
 }
 
 /**
- * highlightCode applies syntax highlighting via hljs if available
+ * highlightCode applies syntax highlighting via CodeMirror 6.
+ * Synchronous — returns plain text if CM6 is not yet loaded.
+ * Triggers background loading so subsequent calls will have CM6 available.
  * @param {string} text
  * @param {string} language
  * @returns {string} HTML string
  */
 export function highlightCode(text, language) {
-  const hljs = typeof window !== 'undefined' ? window.hljs : undefined;
-  if (!language || !hljs) return escapeHtml(text);
+  if (!language) return escapeHtml(text);
+  const cm6 = getCM6Sync();
+  if (!cm6 || !cm6.highlightToHtml) {
+    // Trigger background load for next time
+    ensureCM6();
+    return escapeHtml(text);
+  }
   try {
-    const result = hljs.highlight(text, { language, ignoreIllegals: true });
-    return result.value;
+    const html = cm6.highlightToHtml(text, language);
+    return html !== null ? html : escapeHtml(text);
   } catch {
     return escapeHtml(text);
   }
@@ -267,21 +275,14 @@ export function convertToPngBlob(dataUrl) {
 // ===== Theme =====
 
 /**
- * applyThemeToDocument sets theme attribute and updates hljs stylesheet
+ * applyThemeToDocument sets theme attribute on the document root
  * @param {string} theme - 'system' | 'light' | 'dark'
- * @param {string} hljsBasePath - relative path to vendor/ directory
  * @returns {boolean} whether dark mode is active
  */
-export function applyThemeToDocument(theme, hljsBasePath = 'vendor') {
+export function applyThemeToDocument(theme) {
   document.documentElement.setAttribute('data-theme', theme);
   const isDark = theme === 'dark' ||
     (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const hljsThemeEl = document.getElementById('hljs-theme');
-  if (hljsThemeEl) {
-    hljsThemeEl.href = isDark
-      ? `${hljsBasePath}/hljs-dark.css`
-      : `${hljsBasePath}/hljs-light.css`;
-  }
   return isDark;
 }
 

@@ -940,15 +940,45 @@ pub async fn perform_sync(
     let mut new_image_index = remote_meta.image_index.clone();
     let mut image_pulled = 0i32;
 
-    if sync_images {
-        // Collect all active image records
-        let active_image_hashes: std::collections::HashSet<String> = merged_list
-            .iter()
-            .filter(|item| item.cache_type == "image" && item.deleted_at == 0)
-            .filter_map(|item| item.image_hash.clone())
-            .collect();
+    // 4a. Image PULL: always download cloud images for active records
+    let active_image_hashes: std::collections::HashSet<String> = merged_list
+        .iter()
+        .filter(|item| item.cache_type == "image" && item.deleted_at == 0)
+        .filter_map(|item| item.image_hash.clone())
+        .collect();
 
-        for item in &mut merged_list {
+    for item in &mut merged_list {
+        if item.cache_type != "image" || item.deleted_at != 0 {
+            continue;
+        }
+        let image_hash = match &item.image_hash {
+            Some(h) if !h.is_empty() => h.clone(),
+            _ => continue,
+        };
+
+        // On-demand PULL: image record exists but has no local data
+        if item.image_data_url.is_none() || item.image_data_url.as_ref().map_or(true, |u| u.is_empty()) {
+            let img_file_name = build_image_file_name(&image_hash);
+            if let Some(img_content) = files.get(&img_file_name) {
+                match parse_gist_content(img_content, sync_password) {
+                    Ok(img_data) => {
+                        if let Some(data_url) = img_data.get("image_data_url").and_then(|v| v.as_str()) {
+                            item.image_data_url = Some(data_url.to_string());
+                            item.content = String::new();
+                            image_pulled += 1;
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse image file {}: {}", img_file_name, e);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4b. Image PUSH: only upload when sync_images is enabled
+    if sync_images {
+        for item in &merged_list {
             if item.cache_type != "image" || item.deleted_at != 0 {
                 continue;
             }
@@ -957,29 +987,8 @@ pub async fn perform_sync(
                 _ => continue,
             };
 
-            // On-demand PULL: image record exists but has no local data
-            if item.image_data_url.is_none() || item.image_data_url.as_ref().map_or(true, |u| u.is_empty()) {
-                let img_file_name = build_image_file_name(&image_hash);
-                if let Some(img_content) = files.get(&img_file_name) {
-                    match parse_gist_content(img_content, sync_password) {
-                        Ok(img_data) => {
-                            if let Some(data_url) = img_data.get("image_data_url").and_then(|v| v.as_str()) {
-                                item.image_data_url = Some(data_url.to_string());
-                                item.content = String::new();
-                                image_pulled += 1;
-                            }
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to parse image file {}: {}", img_file_name, e);
-                        }
-                    }
-                }
-            }
-
-            // Incremental PUSH: local image has data but not yet in remote image index
             if let Some(ref data_url) = item.image_data_url {
                 if !data_url.is_empty() && !remote_meta.image_index.contains_key(&image_hash) {
-                    // Enforce per-image size limit
                     let image_size = data_url.len();
                     if image_size > SYNC_IMAGE_MAX_BYTES {
                         log::warn!(
@@ -1013,7 +1022,6 @@ pub async fn perform_sync(
                 total_size, SYNC_IMAGE_TOTAL_MAX_BYTES
             );
             image_files_to_upload.clear();
-            // Revert newly added entries
             for hash in new_image_index.keys().cloned().collect::<Vec<_>>() {
                 if !remote_meta.image_index.contains_key(&hash) {
                     new_image_index.remove(&hash);
@@ -1021,7 +1029,7 @@ pub async fn perform_sync(
             }
         }
 
-        // Clean up orphaned image entries
+        // Clean up orphaned image entries (images whose records are deleted)
         for hash in new_image_index.keys().cloned().collect::<Vec<_>>() {
             if !active_image_hashes.contains(&hash) {
                 image_files_to_upload.insert(build_image_file_name(&hash), None);
@@ -1127,7 +1135,7 @@ pub async fn perform_sync(
             last_sync_at: now,
             record_count: merged_list.len(),
             deleted_ids: combined_deleted_ids,
-            image_index: if sync_images { new_image_index } else { HashMap::new() },
+            image_index: new_image_index,
         };
 
         // Serialize

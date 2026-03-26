@@ -34,7 +34,7 @@ export function createCacheCard(item, callbacks) {
   } else {
     const preview = truncateText(item.content || '');
     if (item.language) {
-      contentHtml = `<pre class="cache-text"><code class="hljs">${highlightCode(preview, item.language)}</code></pre>`;
+      contentHtml = `<pre class="cache-text"><code>${highlightCode(preview, item.language)}</code></pre>`;
     } else {
       contentHtml = `<div class="cache-text">${escapeHtml(preview)}</div>`;
     }
