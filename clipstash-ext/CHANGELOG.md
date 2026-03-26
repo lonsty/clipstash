@@ -10,27 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Cloud Sync** — sync clipboard data across devices via GitHub Gist; connect with a fine-grained PAT (Gists read/write scope)
-- **Auto Sync** — automatically push local changes and periodically pull remote updates (5-minute interval)
-- **Quick Sync button** — header shortcut button for one-click manual sync
-- **Sync status indicator** — extension badge shows sync state (syncing / connected / error)
-- **Trash bin** — soft delete with 30-day retention; records can be restored or permanently deleted
-- **Trash batch actions** — "Restore All" and "Empty Trash" buttons
+- **Sync encryption** — all cloud data is encrypted with AES-256-GCM + gzip compression; users can set an optional sync password for additional security
+- **Sync password management** — set, change, or remove the sync encryption password with confirmation validation
+- **Auto Sync** — automatically push local changes (debounced) and pull remote updates on popup open (throttled to avoid excessive API calls); togglable in settings
+- **Periodic background sync** — uses `chrome.alarms` for 5-minute background sync cycles
+- **Quick Sync button** — header shortcut button for one-click manual sync with status indicator (syncing / connected / error)
+- **Image cloud sync** — optional sync of image clipboard items to Gist with per-image (5 MB) and total (50 MB) quota enforcement
+- **Force Push** — when sync password mismatch is detected, offers a force-push option to overwrite cloud data with local data
+- **Cross-device deduplication** — content hash (SHA-256) based dedup prevents duplicate records across devices during sync
+- **Trash bin** — soft delete with 30-day retention; items can be restored or permanently deleted; countdown shows days remaining
+- **Trash batch actions** — "Restore All" and "Empty Trash" buttons for bulk operations
 - **Delete All Permanently** — danger zone action in settings to permanently wipe all data (active + trash)
-- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js` for code reuse between Extension and Desktop
+- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js`, `crypto.js` for code reuse between Extension and Desktop
 - **Modular architecture** — `popup.js` refactored into modules: `card-renderer.js`, `modal-controller.js`, `trash-panel.js`, `sync-ui.js`, `settings-panel.js`
+- **Adaptive time refresh** — card relative timestamps and sync "last sync" time auto-refresh at adaptive intervals based on age
 
 ### Changed
 
 - **i18n architecture** — shared `BASE_MESSAGES` + platform-specific `EXT_MESSAGES`; `mergeMessages()` function for composability
 - **Time formatting** — delegated to shared `dom-utils.js` with dependency-injected `t()` function
-- **Code organization** — `popup.js` reduced from ~1200 lines to ~290 lines via module extraction; `fullscreen.js` now uses shared `fullscreen-controller.js`
-- **Service worker** — added `try/catch` around `chrome.action.openPopup()` for robustness in restricted contexts
-- **Manifest** — added `alarms` permission and `host_permissions` for GitHub API
-- **Storage layer** — added trash operations, sync data conversion, and GitHub Gist API integration
+- **Code organization** — `popup.js` reduced from ~1200 lines to ~390 lines via module extraction; `fullscreen.js` now uses shared `fullscreen-controller.js`
+- **Service worker** — added `try/catch` around `chrome.action.openPopup()` for robustness in restricted contexts; added periodic sync via `chrome.alarms`
+- **Manifest** — added `alarms` permission and `host_permissions` for `https://api.github.com/*`
+- **Storage layer** — added trash operations, sync data conversion, pending deletion/restoration tracking, and content hash computation
 
-### Fixed
+### Security
 
-- **Sync data format** — `updated_at` field correctly included in snake_case record conversion
+- **Encrypted cloud storage** — all sync data stored in GitHub Gist is encrypted regardless of whether the user sets a password
 
 ## [0.1.3] - 2026-03-20
 
@@ -45,9 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tag duplicate detection** — input shakes with red border and "Tag already exists" hint when adding a duplicate tag
 - **Tag input auto-close** — tag input field auto-closes on blur (150ms delay to avoid click conflicts)
 - **Constants module** — extracted all magic numbers and config values to `constants.js`
-- **Error handling** — comprehensive `console.error` logging for all storage operations (`addCache`, `removeCache`, `clearAllCaches`, `updateCacheTags`, `togglePin`, `updateCacheContent`, `updateCacheLanguage`, `saveTheme`, `exportCaches`, `importCaches`), clipboard reading (`readClipboardViaScript`, `readClipboardViaOffscreen`), and cache workflow (`cacheClipboard` with red ✗ badge on failure)
-- **Public API** — exported `getCaches` function for external use
-- **i18n keys** — added `fullscreen`, `edit`, `editing`, `cancelEdit`, `saveEdit`, `save`, `syntaxLang`, `addTagHint`, `tagExists`, `unsavedTitle`, `unsavedDesc`, `discardChanges`
 
 ### Changed
 
@@ -55,11 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Modal footer removed** — copy/edit buttons moved to floating toolbar; meta info moved to bottom status bar
 - **Tags section redesign** — inline flow layout with `+` circle button (dashed border); shows "Add tag" text when empty, icon-only when tags exist
 - **Language selector relocated** — moved from tags section to status bar right side
-- **Multi-page style unification** — extracted shared CSS classes (`.content-toolbar`, `.toolbar-btn`) across modal and fullscreen pages
 - **Toolbar button opacity** — three-level progressive opacity: default 0.25 → content area hover 0.75 → button hover 1
-- **Code refactoring** — unified error handling patterns across all storage functions
-- **Clipboard API** — prioritize modern `navigator.clipboard` API with `execCommand` fallback
-- **Code organization** — imported constants from centralized module for better maintainabilityext-v0.1.3
 - **Build script** — added `fullscreen/` directory to build copy list
 
 ### Security
@@ -88,7 +87,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tags display** — tags now show with text truncation and tooltip; hidden when empty
 - **Card code preview** — code cards show syntax-highlighted preview with language badge
 - **Import/export** — `language` field included in data portability
-- **Code cleanup** — removed unused i18n keys and redundant fallback code
 
 ## [0.1.0] - 2026-03-03
 
@@ -115,11 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Themes** — System / Light / Dark modes, instant switch
 - **i18n** — English & 中文, instant switch
 - **Fixed header** — title bar, search bar, stats bar pinned to top; list scrolls independently
-- **Card hover effect** — lift + deeper shadow on hover
-- **GitHub link** — icon button in popup header
-- **Special page fallback** — graceful handling of restricted pages
+- **Hotkey** — Default `Alt+Shift+C`, customizable in `chrome://extensions/shortcuts`
 - **Manifest V3** — supports Chrome 104+
-- **Zero dependencies** — pure frontend, no runtime dependencies, no network requests
+- **Zero dependencies** — pure frontend, no runtime dependencies
 
 [0.2.0]: https://github.com/lonsty/clipstash/releases/tag/v0.2.0
 [0.1.3]: https://github.com/lonsty/clipstash/releases/tag/v0.1.3

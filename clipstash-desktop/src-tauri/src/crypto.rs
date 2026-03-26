@@ -1,5 +1,5 @@
 // ClipStash Desktop - Crypto utilities (gzip + AES-256-GCM)
-// Mirrors shared/crypto.js for cross-platform compatibility.
+// Mirrors shared/crypto.js — sync data format: base64(encrypt(gzip(json)))
 
 use aes_gcm::{
     aead::{Aead, KeyInit},

@@ -1,4 +1,5 @@
 // ClipStash Extension - Cloud sync module (GitHub Gist backend)
+// Sync data is always encrypted: base64(encrypt(gzip(json)))
 
 import {
   getCachesRaw,
@@ -12,6 +13,7 @@ import {
   clearPendingRestored,
 } from './storage.js';
 import { packSyncData, unpackSyncData, encryptToken, decryptToken } from '../shared/crypto.js';
+import { DEFAULT_AUTO_SYNC, DEFAULT_SYNC_IMAGES } from '../shared/constants.js';
 
 const GIST_DATA_FILE = 'clipstash-data.json';
 const GIST_META_FILE = 'clipstash-meta.json';
@@ -19,7 +21,6 @@ const GIST_IMAGE_PREFIX = 'clipstash-img-';
 const GIST_DESCRIPTION = 'ClipStash Cloud Sync Data (do not delete)';
 const API_BASE = 'https://api.github.com';
 const SYNC_SETTINGS_KEY = 'clipstash-sync';
-const SYNC_DATA_V2 = 2;
 const SYNC_IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5 MB per image
 const SYNC_IMAGE_TOTAL_MAX_BYTES = 50 * 1024 * 1024; // 50 MB total quota
 
@@ -41,9 +42,9 @@ export async function getSyncSettings() {
       gistId: '',
       enabled: false,
       lastSyncAt: 0,
-      autoSync: true,
+      autoSync: DEFAULT_AUTO_SYNC,
       syncPassword: '',
-      syncImages: false,
+      syncImages: DEFAULT_SYNC_IMAGES,
       ...data[SYNC_SETTINGS_KEY],
     };
 
@@ -59,7 +60,7 @@ export async function getSyncSettings() {
 
     return raw;
   } catch {
-    return { token: '', gistId: '', enabled: false, lastSyncAt: 0, autoSync: true, syncPassword: '', syncImages: false };
+    return { token: '', gistId: '', enabled: false, lastSyncAt: 0, autoSync: DEFAULT_AUTO_SYNC, syncPassword: '', syncImages: DEFAULT_SYNC_IMAGES };
   }
 }
 
@@ -152,9 +153,12 @@ async function findClipstashGist(token) {
  * @param {string} token
  * @returns {Promise<string>} gist ID
  */
-async function createGist(token) {
-  const emptyData = { version: SYNC_DATA_V2, app: 'ClipStash', records: [] };
-  const emptyMeta = { version: SYNC_DATA_V2, last_sync_at: 0, record_count: 0, deleted_ids: [] };
+async function createGist(token, syncPassword) {
+  const emptyData = { app: 'ClipStash', records: [] };
+  const emptyMeta = { last_sync_at: 0, record_count: 0, deleted_ids: [] };
+
+  const dataContent = await serializeGistContent(emptyData, syncPassword);
+  const metaContent = await serializeGistContent(emptyMeta, syncPassword);
 
   const resp = await fetch(`${API_BASE}/gists`, {
     method: 'POST',
@@ -163,8 +167,8 @@ async function createGist(token) {
       description: GIST_DESCRIPTION,
       public: false,
       files: {
-        [GIST_DATA_FILE]: { content: JSON.stringify(emptyData) },
-        [GIST_META_FILE]: { content: JSON.stringify(emptyMeta) },
+        [GIST_DATA_FILE]: { content: dataContent },
+        [GIST_META_FILE]: { content: metaContent },
       },
     }),
   });
@@ -260,49 +264,31 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// ===== V2 Data Format Helpers =====
+// ===== Encrypted Data Format Helpers =====
 
 /**
- * parseGistContent auto-detects v1 (plain JSON) vs v2 (encrypted+gzip) format.
- * v2 content is NOT valid JSON — it's a base64 string of encrypt(gzip(json)).
+ * parseGistContent decrypts and decompresses Gist file content.
+ * Content format: base64(encrypt(gzip(json)))
  * @param {string} content - raw gist file content
- * @param {string} syncPassword - user's sync password (empty = no encryption)
+ * @param {string} syncPassword - user's sync password (required)
  * @returns {Promise<Object>} parsed JSON object
  */
 async function parseGistContent(content, syncPassword) {
-  // Try JSON.parse first (v1 plain JSON)
-  try {
-    const parsed = JSON.parse(content);
-    // If it has a `version` field, it's a valid v1 data envelope
-    if (parsed && typeof parsed === 'object') {
-      return parsed;
-    }
-  } catch {
-    // Not valid JSON — likely v2 encrypted format
-  }
-
-  // v2: base64(encrypt(gzip(json))) — requires sync password
-  if (!syncPassword) {
-    throw new Error('syncPasswordRequired');
-  }
-
+  if (!syncPassword) throw new Error('syncPasswordRequired');
   const jsonStr = await unpackSyncData(content, syncPassword);
   return JSON.parse(jsonStr);
 }
 
 /**
- * serializeGistContent serializes data for upload.
- * If syncPassword is set, uses v2 format: base64(encrypt(gzip(json))).
- * If no password, uses v1 plain JSON for backward compatibility.
+ * serializeGistContent compresses and encrypts data for upload.
+ * Output format: base64(encrypt(gzip(json)))
  * @param {Object} data - the data object to serialize
- * @param {string} syncPassword - user's sync password (empty = plain JSON)
+ * @param {string} syncPassword - user's sync password (required)
  * @returns {Promise<string>} serialized content string
  */
 async function serializeGistContent(data, syncPassword) {
+  if (!syncPassword) throw new Error('syncPasswordRequired');
   const jsonStr = JSON.stringify(data);
-  if (!syncPassword) {
-    return jsonStr;
-  }
   return packSyncData(jsonStr, syncPassword);
 }
 
@@ -433,7 +419,9 @@ export async function initSync(token) {
 
   let gistId = await findClipstashGist(token);
   if (!gistId) {
-    gistId = await createGist(token);
+    // Preserve existing syncPassword if reconnecting
+    const existing = await getSyncSettings();
+    gistId = await createGist(token, existing.syncPassword);
   }
 
   // Preserve existing syncPassword and syncImages if reconnecting
@@ -469,7 +457,7 @@ export async function performSync(options = {}) {
 
   const { token, gistId, syncPassword, syncImages } = settings;
 
-  // 1. Pull: fetch remote data (auto-detects v1 JSON vs v2 encrypted)
+  // 1. Pull: fetch and decrypt remote data
   // In forcePush mode, we still fetch files for image index but skip data/meta parse
   const files = forcePush ? {} : await getGistFiles(token, gistId);
   let remoteRecords = [];
@@ -477,12 +465,9 @@ export async function performSync(options = {}) {
     try {
       const parsed = await parseGistContent(files[GIST_DATA_FILE], syncPassword);
       remoteRecords = parsed.records || [];
-    } catch (err) {
-      // If a sync password is set and decryption failed, always treat as wrong password.
-      if (syncPassword) {
-        throw new Error('syncPasswordWrong');
-      }
-      remoteRecords = [];
+    } catch {
+      // Decryption failed — likely wrong password
+      throw new Error('syncPasswordWrong');
     }
   }
 
@@ -695,16 +680,14 @@ export async function performSync(options = {}) {
         return exported;
       });
 
-    const newData = { version: SYNC_DATA_V2, app: 'ClipStash', records: uploadRecords };
+    const newData = { app: 'ClipStash', records: uploadRecords };
     const newMeta = {
-      version: SYNC_DATA_V2,
       last_sync_at: now,
       record_count: uploadRecords.length,
       deleted_ids: finalDeletedIds,
       ...(syncImages ? { image_index: newImageIndex } : {}),
     };
 
-    // Serialize: v2 encrypted+compressed if password set, else plain JSON
     const dataStr = await serializeGistContent(newData, syncPassword);
     const metaStr = await serializeGistContent(newMeta, syncPassword);
 

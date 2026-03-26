@@ -504,8 +504,6 @@ pub async fn validate_sync_token(token: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn init_cloud_sync(state: State<'_, AppState>, token: String) -> Result<SyncSettings, String> {
-    let (gist_id, username) = sync::init_sync(&token).await?;
-
     // Preserve existing sync_password and sync_images if reconnecting
     let (existing_password, existing_sync_images) = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -513,12 +511,14 @@ pub async fn init_cloud_sync(state: State<'_, AppState>, token: String) -> Resul
         (s.sync_password, s.sync_images)
     };
 
+    let (gist_id, username) = sync::init_sync(&token, &existing_password).await?;
+
     let settings = SyncSettings {
         token: token.clone(),
         gist_id: gist_id.clone(),
         enabled: true,
         last_sync_at: 0,
-        auto_sync: true,
+        auto_sync: false,
         sync_password: existing_password,
         sync_images: existing_sync_images,
     };

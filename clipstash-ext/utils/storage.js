@@ -776,43 +776,6 @@ export { fromSnakeRecord as fromSnakeRecordImport };
  */
 export { computeContentHash as computeContentHashExport };
 
-/**
- * migrateContentHash backfills contentHash for existing records that lack it.
- * Should be called once on extension install/update. Skips records that already
- * have a contentHash. Safe to call multiple times (idempotent).
- * @returns {Promise<number>} number of records migrated
- */
-export async function migrateContentHash() {
-  try {
-    const data = await chrome.storage.local.get(STORAGE_KEY);
-    const caches = data[STORAGE_KEY] || [];
-    let migrated = 0;
-
-    for (const item of caches) {
-      if (item.contentHash) continue;
-      if (item.type === 'image') {
-        if (item.imageHash) {
-          item.contentHash = item.imageHash;
-          migrated++;
-        }
-        continue;
-      }
-      if (!item.content) continue;
-      item.contentHash = await computeContentHash(item.type || 'text', item.content);
-      if (item.contentHash) migrated++;
-    }
-
-    if (migrated > 0) {
-      await chrome.storage.local.set({ [STORAGE_KEY]: caches });
-      console.log(`[Storage] Migrated contentHash for ${migrated} records`);
-    }
-    return migrated;
-  } catch (error) {
-    console.error('[Storage] Failed to migrate contentHash:', error);
-    return 0;
-  }
-}
-
 // ===== Pending Deleted IDs (for sync propagation) =====
 
 /**

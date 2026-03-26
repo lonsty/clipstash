@@ -3,10 +3,9 @@
 // (clipboard write, HTML sanitization, data loading) is injected via callbacks.
 
 import {
-  highlightCode, escapeHtml, estimateDataUrlBytes, formatBytes,
-  renderTagBadge, showTagExistsHint, showCopyFeedback,
-  createConfirmController, applyI18n as sharedApplyI18n,
-  applyThemeToDocument,
+  highlightCode, estimateDataUrlBytes, formatBytes,
+  renderTagBadge, showTagExistsHint,
+  createConfirmController,
 } from './dom-utils.js';
 import { MAX_TAG_LENGTH } from './constants.js';
 

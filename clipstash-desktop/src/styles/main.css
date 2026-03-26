@@ -324,6 +324,12 @@ body {
   color: var(--danger);
 }
 
+.btn-sync-quick.is-disabled {
+  color: var(--text-muted);
+  opacity: .4;
+  cursor: not-allowed;
+}
+
 .btn-sync-quick.syncing {
   opacity: .5;
   pointer-events: none;
@@ -1326,11 +1332,20 @@ body {
 }
 
 .settings-item {
-  margin-bottom: 12px;
+  margin-bottom: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-light);
+  padding-top: 12px;
+}
+
+.settings-item:first-child {
+  padding-top: 0;
 }
 
 .settings-item:last-child {
   margin-bottom: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .settings-label {
@@ -1517,6 +1532,59 @@ body {
 
 .import-status.error {
   color: var(--danger);
+}
+
+/* Cloud Sync — unified group with steps */
+.settings-item--sync-group > .settings-desc {
+  margin-bottom: 4px;
+}
+
+.sync-step {
+  padding: 8px 0;
+}
+
+.sync-step:first-of-type {
+  padding-top: 0;
+}
+
+.sync-step-title {
+  margin-bottom: 4px;
+}
+
+.sync-step.is-disabled .sync-step-title {
+  color: var(--text-muted);
+}
+
+.sync-step.is-disabled {
+  opacity: .5;
+  pointer-events: none;
+}
+
+.sync-step--options .settings-toggle {
+  margin-top: 4px;
+}
+
+/* Password input with show/copy buttons */
+.sync-password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.sync-password-input-wrap .sync-password-input {
+  padding-right: 56px;
+}
+
+.sync-password-input-actions {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sync-password-input-actions .sync-token-toggle {
+  position: static;
 }
 
 /* Cloud Sync */
@@ -1793,9 +1861,6 @@ body {
 
 /* Danger Zone in Settings */
 .settings-danger-zone {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-light);
 }
 
 .settings-danger-zone__actions {
@@ -1810,8 +1875,6 @@ body {
   justify-content: center;
   gap: 6px;
   padding: 14px 0 4px;
-  margin-top: 12px;
-  border-top: 1px solid var(--border-light);
   font-size: 11px;
   color: var(--text-muted);
 }

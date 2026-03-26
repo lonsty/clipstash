@@ -58,7 +58,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            cache_limit: 100,
+            cache_limit: 300,
             theme: "system".to_string(),
             language: "en".to_string(),
             hotkey: "Alt+Shift+C".to_string(),

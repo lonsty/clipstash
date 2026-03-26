@@ -1,5 +1,5 @@
 // ClipStash - Shared crypto utilities (gzip + AES-256-GCM)
-// Used for v2 Gist data format: base64(encrypt(gzip(json)))
+// Sync data format: base64(encrypt(gzip(json)))
 
 // ===== Gzip Compression =====
 
@@ -8,7 +8,7 @@
  * @param {string} str - plain text to compress
  * @returns {Promise<Uint8Array>} compressed bytes
  */
-export async function gzipCompress(str) {
+async function gzipCompress(str) {
   const encoder = new TextEncoder();
   const input = encoder.encode(str);
   const cs = new CompressionStream('gzip');
@@ -40,7 +40,7 @@ export async function gzipCompress(str) {
  * @param {Uint8Array} compressed - gzip-compressed bytes
  * @returns {Promise<string>} decompressed plain text
  */
-export async function gzipDecompress(compressed) {
+async function gzipDecompress(compressed) {
   const ds = new DecompressionStream('gzip');
   const writer = ds.writable.getWriter();
   writer.write(compressed);
@@ -112,7 +112,7 @@ async function deriveKey(passphrase) {
  * @param {string} passphrase - user's sync password
  * @returns {Promise<Uint8Array>} encrypted bytes (iv + ciphertext)
  */
-export async function encrypt(data, passphrase) {
+async function encrypt(data, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
@@ -136,7 +136,7 @@ export async function encrypt(data, passphrase) {
  * @param {string} passphrase - user's sync password
  * @returns {Promise<Uint8Array>} decrypted plaintext bytes
  */
-export async function decrypt(data, passphrase) {
+async function decrypt(data, passphrase) {
   const key = await deriveKey(passphrase);
   const iv = data.slice(0, 12);
   const ciphertext = data.slice(12);
@@ -157,7 +157,7 @@ export async function decrypt(data, passphrase) {
  * @param {Uint8Array} bytes
  * @returns {string}
  */
-export function uint8ToBase64(bytes) {
+function uint8ToBase64(bytes) {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
@@ -170,7 +170,7 @@ export function uint8ToBase64(bytes) {
  * @param {string} b64
  * @returns {Uint8Array}
  */
-export function base64ToUint8(b64) {
+function base64ToUint8(b64) {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {

@@ -13,7 +13,9 @@ import {
 import { info, attachConsole, forwardConsole } from '../utils/logger.js';
 import {
   debounce, applyI18n, createConfirmController, applyThemeToDocument,
+  getAdaptiveRefreshInterval,
 } from '../shared/dom-utils.js';
+import { formatRelativeTime } from '../utils/time.js';
 import {
   PAGE_SIZE, SEARCH_DEBOUNCE_DELAY, FEEDBACK_DISPLAY_DURATION, TRASH_TTL_MS,
 } from '../shared/constants.js';
@@ -32,6 +34,7 @@ let allFilteredCaches = [];
 let displayedCount = 0;
 let isLoadingMore = false;
 let currentQuery = '';
+let timeRefreshTimer = null;
 
 // ===== DOM References =====
 
@@ -71,6 +74,28 @@ async function refreshList() {
   await updateStats();
   updateEmptyStates();
   await updateTrashButton();
+  scheduleTimeRefresh();
+}
+
+/**
+ * scheduleTimeRefresh adaptively refreshes all [data-relative-time] elements.
+ * Cancels any pending timer and re-schedules based on the newest visible timestamp.
+ */
+function scheduleTimeRefresh() {
+  clearTimeout(timeRefreshTimer);
+  const els = document.querySelectorAll('[data-relative-time]');
+  let newest = 0;
+  els.forEach((el) => {
+    const ts = Number(el.dataset.relativeTime);
+    if (ts > 0) {
+      el.textContent = formatRelativeTime(ts);
+      if (ts > newest) newest = ts;
+    }
+  });
+  const interval = getAdaptiveRefreshInterval(newest);
+  if (interval > 0) {
+    timeRefreshTimer = setTimeout(scheduleTimeRefresh, interval);
+  }
 }
 
 function appendNextPage() {
@@ -369,6 +394,9 @@ async function init() {
   if (settings.clipboardMonitor) {
     await setClipboardMonitor(true).catch(() => {});
   }
+
+  // Kick off adaptive relative-time refresh
+  scheduleTimeRefresh();
 
   info('Main window initialized');
 }

@@ -31,7 +31,7 @@
 |------|------|
 | 剪切板缓存 | 点击缓存剪切板内容，支持文本、图片、HTML 富文本 |
 | 快捷复制 | 一键复制，显示"已复制 ✓"反馈 |
-| 云同步 | 通过 GitHub Gist 跨设备同步剪贴板数据，支持自动同步 |
+| 云同步 | 通过 GitHub Gist 跨设备同步剪贴板数据；所有数据使用 AES-256-GCM 加密 |
 | 回收站 | 软删除，保留 30 天；支持恢复或永久删除 |
 | 内联编辑 | 浮动工具栏直接编辑文本内容，离开前确认未保存变更 |
 | 全屏查看 | 新标签页全屏展示，支持编辑和语法高亮 |
@@ -136,6 +136,7 @@ clipstash-ext/
 │   └── fullscreen.js          # 全屏逻辑
 ├── shared/                    # 共享模块（从根目录 shared/ 符号链接）
 │   ├── constants.js           # 共享常量
+│   ├── crypto.js              # 加密与压缩（AES-256-GCM + gzip）
 │   ├── dom-utils.js           # DOM 工具函数
 │   ├── fullscreen-controller.js # 全屏页面控制器
 │   ├── icons.js               # SVG 图标定义
@@ -162,7 +163,7 @@ clipstash-ext/
 
 - 不收集任何用户数据
 - 所有数据仅存储在本地（`chrome.storage.local`）
-- 可选通过 GitHub Gist 云同步（用户自主控制；仅在启用时连接 `api.github.com`）
+- 可选通过 GitHub Gist 云同步（用户自主控制；仅在启用时连接 `api.github.com`；所有同步数据始终加密）
 
 ## 相关项目
 

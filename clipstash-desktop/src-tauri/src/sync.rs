@@ -1,4 +1,5 @@
 // ClipStash Desktop - Cloud sync module (GitHub Gist backend)
+// Sync data is always encrypted: base64(encrypt(gzip(json)))
 
 use crate::crypto;
 use crate::db::{self, CacheItem, Database};
@@ -11,9 +12,6 @@ const GIST_META_FILE: &str = "clipstash-meta.json";
 const GIST_IMAGE_PREFIX: &str = "clipstash-img-";
 const GIST_DESCRIPTION: &str = "ClipStash Cloud Sync Data (do not delete)";
 const API_BASE: &str = "https://api.github.com";
-
-/// Data format version — v2 uses base64(encrypt(gzip(json)))
-const SYNC_DATA_V2: i32 = 2;
 
 /// 30 days in milliseconds — entries older than this are pruned from deleted_ids.
 const DELETED_IDS_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -53,7 +51,7 @@ pub struct SyncSettings {
 }
 
 fn default_auto_sync() -> bool {
-    true
+    false
 }
 
 impl Default for SyncSettings {
@@ -63,7 +61,7 @@ impl Default for SyncSettings {
             gist_id: String::new(),
             enabled: false,
             last_sync_at: 0,
-            auto_sync: true,
+            auto_sync: false,
             sync_password: String::new(),
             sync_images: false,
         }
@@ -82,7 +80,6 @@ struct ImageIndexEntry {
 /// SyncMeta is stored in the Gist's meta file to track sync state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SyncMeta {
-    version: i32,
     last_sync_at: i64,
     record_count: usize,
     deleted_ids: Vec<DeletedEntry>,
@@ -95,7 +92,6 @@ struct SyncMeta {
 /// RemoteData is the JSON structure stored in the Gist data file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RemoteData {
-    version: i32,
     app: String,
     records: Vec<serde_json::Value>,
 }
@@ -200,33 +196,39 @@ async fn find_clipstash_gist(
     Ok(None)
 }
 
-/// create_gist creates a new secret gist with empty data.
+/// create_gist creates a new secret gist with empty encrypted data.
 async fn create_gist(
     client: &reqwest::Client,
     headers: &HeaderMap,
+    sync_password: &str,
 ) -> Result<String, String> {
     let empty_data = RemoteData {
-        version: SYNC_DATA_V2,
         app: "ClipStash".to_string(),
         records: Vec::new(),
     };
     let empty_meta = SyncMeta {
-        version: SYNC_DATA_V2,
         last_sync_at: 0,
         record_count: 0,
         deleted_ids: Vec::new(),
         image_index: HashMap::new(),
     };
 
+    let data_val = serde_json::to_value(&empty_data)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    let meta_val = serde_json::to_value(&empty_meta)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+    let data_content = serialize_gist_content(&data_val, sync_password)?;
+    let meta_content = serialize_gist_content(&meta_val, sync_password)?;
+
     let body = serde_json::json!({
         "description": GIST_DESCRIPTION,
         "public": false,
         "files": {
             GIST_DATA_FILE: {
-                "content": serde_json::to_string(&empty_data).unwrap_or_default()
+                "content": data_content
             },
             GIST_META_FILE: {
-                "content": serde_json::to_string(&empty_meta).unwrap_or_default()
+                "content": meta_content
             }
         }
     });
@@ -376,41 +378,31 @@ fn build_image_file_name(image_hash: &str) -> String {
     format!("{}{}.json", GIST_IMAGE_PREFIX, image_hash)
 }
 
-// ===== V2 Data Format Helpers =====
+// ===== Encrypted Data Format Helpers =====
 
-/// parse_gist_content auto-detects v1 (plain JSON) vs v2 (encrypted+gzip) format.
-/// v2 content is NOT valid JSON — it's a base64 string of encrypt(gzip(json)).
+/// parse_gist_content decrypts and decompresses Gist file content.
+/// Content format: base64(encrypt(gzip(json)))
+/// Sync password is required — sync cannot operate without it.
 fn parse_gist_content(content: &str, sync_password: &str) -> Result<serde_json::Value, String> {
-    // Try JSON parse first (v1 plain JSON)
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
-        if parsed.is_object() || parsed.is_array() {
-            return Ok(parsed);
-        }
-    }
-
-    // v2: base64(encrypt(gzip(json))) — requires sync password
     if sync_password.is_empty() {
         return Err("syncPasswordRequired".to_string());
     }
-
     let json_str = crypto::unpack_sync_data(content, sync_password)?;
     serde_json::from_str(&json_str).map_err(|e| format!("JSON parse error after decrypt: {}", e))
 }
 
-/// serialize_gist_content serializes data for upload.
-/// If sync_password is set, uses v2 format: base64(encrypt(gzip(json))).
-/// If no password, uses v1 plain JSON for backward compatibility.
+/// serialize_gist_content compresses and encrypts data for upload.
+/// Output format: base64(encrypt(gzip(json)))
+/// Sync password is required — sync cannot operate without it.
 fn serialize_gist_content(
     data: &serde_json::Value,
     sync_password: &str,
 ) -> Result<String, String> {
+    if sync_password.is_empty() {
+        return Err("syncPasswordRequired".to_string());
+    }
     let json_str =
         serde_json::to_string(data).map_err(|e| format!("Serialize error: {}", e))?;
-
-    if sync_password.is_empty() {
-        return Ok(json_str);
-    }
-
     crypto::pack_sync_data(&json_str, sync_password)
 }
 
@@ -473,7 +465,7 @@ fn json_to_record(rec: &serde_json::Value) -> Option<CacheItem> {
         .and_then(|v| v.as_i64())
         .unwrap_or(created_at);
 
-    // Parse content_hash; compute if missing (backward compat with v1 data, skip for images)
+    // Parse content_hash; compute if missing (skip for images)
     let content_hash = rec
         .get("content_hash")
         .and_then(|v| v.as_str())
@@ -830,7 +822,7 @@ impl Database {
 
 /// init_sync validates the token and finds or creates the ClipStash gist.
 /// Returns (gist_id, github_username).
-pub async fn init_sync(token: &str) -> Result<(String, String), String> {
+pub async fn init_sync(token: &str, sync_password: &str) -> Result<(String, String), String> {
     let username = validate_token(token).await?;
 
     let client = reqwest::Client::new();
@@ -843,7 +835,7 @@ pub async fn init_sync(token: &str) -> Result<(String, String), String> {
             id
         }
         None => {
-            let id = create_gist(&client, &headers).await?;
+            let id = create_gist(&client, &headers, sync_password).await?;
             log::info!("Created new ClipStash gist: id={}", id);
             id
         }
@@ -853,11 +845,7 @@ pub async fn init_sync(token: &str) -> Result<(String, String), String> {
 }
 
 /// perform_sync executes a full sync cycle: pull → merge → push.
-/// `sync_password` is the user's sync password (empty = no encryption).
-/// `sync_images` enables image cloud sync.
-/// `local_pending_deleted` contains IDs deleted locally since last sync.
-/// `local_pending_restored` contains IDs restored locally since last sync.
-/// `force_push` skips remote data pull and pushes local data directly (password recovery).
+/// Sync data is always encrypted using the sync password or a built-in default key.
 pub async fn perform_sync(
     token: &str,
     gist_id: &str,
@@ -871,87 +859,50 @@ pub async fn perform_sync(
     let client = reqwest::Client::new();
     let headers = build_headers(token)?;
 
-    // 1. Pull: fetch remote data (auto-detects v1 JSON vs v2 encrypted)
-    // In force_push mode, skip remote data — we'll overwrite everything
+    // 1. Pull: fetch and decrypt remote data
     let files: HashMap<String, String> = if force_push {
         HashMap::new()
     } else {
         get_gist_files(&client, &headers, gist_id).await?
     };
 
+    let empty_data = || RemoteData {
+        app: "ClipStash".to_string(),
+        records: Vec::new(),
+    };
+    let empty_meta = || SyncMeta {
+        last_sync_at: 0,
+        record_count: 0,
+        deleted_ids: Vec::new(),
+        image_index: HashMap::new(),
+    };
+
     let remote_data: RemoteData = if !force_push {
         if let Some(data_str) = files.get(GIST_DATA_FILE) {
             match parse_gist_content(data_str, sync_password) {
-                Ok(val) => serde_json::from_value(val).unwrap_or(RemoteData {
-                    version: SYNC_DATA_V2,
-                    app: "ClipStash".to_string(),
-                    records: Vec::new(),
-                }),
-                Err(e) => {
-                    if !sync_password.is_empty() {
-                        return Err("syncPasswordWrong".to_string());
-                    }
-                    log::warn!("Failed to parse remote data (no password set): {}", e);
-                    RemoteData {
-                        version: SYNC_DATA_V2,
-                        app: "ClipStash".to_string(),
-                        records: Vec::new(),
-                    }
+                Ok(val) => serde_json::from_value(val).unwrap_or_else(|_| empty_data()),
+                Err(_) => {
+                    return Err("syncPasswordWrong".to_string());
                 }
             }
         } else {
-            RemoteData {
-                version: SYNC_DATA_V2,
-                app: "ClipStash".to_string(),
-                records: Vec::new(),
-            }
+            empty_data()
         }
     } else {
-        RemoteData {
-            version: SYNC_DATA_V2,
-            app: "ClipStash".to_string(),
-            records: Vec::new(),
-        }
+        empty_data()
     };
 
-    // Parse remote meta (for deleted_ids and image_index from other devices)
     let remote_meta: SyncMeta = if !force_push {
         if let Some(meta_str) = files.get(GIST_META_FILE) {
             match parse_gist_content(meta_str, sync_password) {
-                Ok(val) => serde_json::from_value(val).unwrap_or(SyncMeta {
-                    version: SYNC_DATA_V2,
-                    last_sync_at: 0,
-                    record_count: 0,
-                    deleted_ids: Vec::new(),
-                    image_index: HashMap::new(),
-                }),
-                Err(_) => {
-                    SyncMeta {
-                        version: SYNC_DATA_V2,
-                        last_sync_at: 0,
-                        record_count: 0,
-                        deleted_ids: Vec::new(),
-                        image_index: HashMap::new(),
-                    }
-                }
+                Ok(val) => serde_json::from_value(val).unwrap_or_else(|_| empty_meta()),
+                Err(_) => empty_meta(),
             }
         } else {
-            SyncMeta {
-                version: SYNC_DATA_V2,
-                last_sync_at: 0,
-                record_count: 0,
-                deleted_ids: Vec::new(),
-                image_index: HashMap::new(),
-            }
+            empty_meta()
         }
     } else {
-        SyncMeta {
-            version: SYNC_DATA_V2,
-            last_sync_at: 0,
-            record_count: 0,
-            deleted_ids: Vec::new(),
-            image_index: HashMap::new(),
-        }
+        empty_meta()
     };
 
     // Build local deleted ID set
@@ -1169,12 +1120,10 @@ pub async fn perform_sync(
             .collect();
 
         let new_data = RemoteData {
-            version: SYNC_DATA_V2,
             app: "ClipStash".to_string(),
             records: upload_records,
         };
         let new_meta = SyncMeta {
-            version: SYNC_DATA_V2,
             last_sync_at: now,
             record_count: merged_list.len(),
             deleted_ids: combined_deleted_ids,

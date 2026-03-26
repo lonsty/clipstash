@@ -18,7 +18,7 @@ export async function getSyncSettings() {
       gistId: '',
       enabled: false,
       lastSyncAt: 0,
-      autoSync: true,
+      autoSync: false,
       syncPassword: '',
     };
   }

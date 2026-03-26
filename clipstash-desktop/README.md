@@ -25,7 +25,7 @@
 
 - **Clipboard caching** — text, images (PNG / JPEG), and HTML rich text
 - **Deduplication** — SHA-256 hash for images, exact match for text
-- **Cloud Sync** — sync clipboard data across devices via GitHub Gist with auto-sync support
+- **Cloud Sync** — sync clipboard data across devices via GitHub Gist; all data encrypted with AES-256-GCM; optional user-defined sync password for additional security
 - **Trash bin** — soft delete with 30-day retention, restore or permanently delete
 - **System tray** — lives in the menu bar / taskbar; popover-style window
 - **Global hotkey** — `Alt+Shift+C` (customizable) to cache clipboard instantly
@@ -33,10 +33,10 @@
 - **Search & tags** — real-time search, tagging, pinning
 - **Inline editing** — edit content in detail modal with syntax highlighting, floating toolbar, and unsaved change protection
 - **Fullscreen & sticky note** — view content fullscreen or pin as always-on-top floating note
-- **Import / export** — JSON-based data portability
+- **Import / export** — JSON-based data portability (unencrypted for human readability)
 - **Themes** — System / Light / Dark with full CSS variable system
 - **i18n** — English & 中文
-- **Privacy first** — all data stored locally in SQLite; optional cloud sync via GitHub Gist (user-controlled)
+- **Privacy first** — all data stored locally in SQLite; cloud sync data is always encrypted
 
 ## Screenshot
 
@@ -181,6 +181,7 @@ clipstash-desktop/
 │   │       └── trash-panel.js     # Trash bin panel
 │   ├── shared/                    # Shared modules (synced from root shared/)
 │   │   ├── constants.js           # Shared constants
+│   │   ├── crypto.js              # Encryption & compression (AES-256-GCM + gzip)
 │   │   ├── dom-utils.js           # DOM utility functions
 │   │   ├── fullscreen-controller.js # Fullscreen page controller
 │   │   ├── icons.js               # SVG icon definitions

@@ -1,6 +1,6 @@
 // ClipStash - Service Worker (icon click, shortcut, context menu, periodic sync)
 
-import { addCache, migrateContentHash } from '../utils/storage.js';
+import { addCache } from '../utils/storage.js';
 import { readClipboardViaScript, readClipboardViaOffscreen } from '../utils/clipboard.js';
 import { getSyncSettings, performSync } from '../utils/sync.js';
 import { SYNC_PERIODIC_PULL_INTERVAL } from '../utils/constants.js';
@@ -84,14 +84,7 @@ chrome.runtime.onInstalled.addListener(() => {
     title: 'Settings',
     contexts: ['action']
   });
-  // Set up periodic sync alarm
   setupSyncAlarm();
-  // Backfill contentHash for existing records that lack it (one-time migration)
-  migrateContentHash().then((count) => {
-    if (count > 0) {
-      console.log(`[ClipStash] Migrated contentHash for ${count} existing records`);
-    }
-  });
 });
 
 // ===== Periodic Sync via chrome.alarms =====

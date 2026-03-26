@@ -20,6 +20,10 @@ import {
   permanentDeleteCache as bridgePermanentDeleteCache,
   purgeExpiredCaches as bridgePurgeExpiredCaches,
 } from './bridge.js';
+import {
+  DEFAULT_MAX_CACHE_SIZE, DEFAULT_LANGUAGE, DEFAULT_THEME, DEFAULT_HOTKEY,
+  DEFAULT_AUTOSTART, DEFAULT_CLIPBOARD_MONITOR, DEFAULT_SHOW_NOTIFICATION,
+} from '../shared/constants.js';
 
 // ===== Storage Change Hooks =====
 // Pub-sub system: any module can subscribe to data mutations.
@@ -84,13 +88,13 @@ export async function getSettings() {
     return await bridgeGetSettings();
   } catch {
     return {
-      cacheLimit: 100,
-      theme: 'system',
-      language: 'en',
-      hotkey: 'Alt+Shift+C',
-      clipboardMonitor: false,
-      autostart: false,
-      showNotification: true,
+      cacheLimit: DEFAULT_MAX_CACHE_SIZE,
+      theme: DEFAULT_THEME,
+      language: DEFAULT_LANGUAGE,
+      hotkey: DEFAULT_HOTKEY,
+      clipboardMonitor: DEFAULT_CLIPBOARD_MONITOR,
+      autostart: DEFAULT_AUTOSTART,
+      showNotification: DEFAULT_SHOW_NOTIFICATION,
     };
   }
 }

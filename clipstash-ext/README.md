@@ -31,7 +31,7 @@
 |---------|-------------|
 | Clipboard caching | Cache clipboard content on click; supports text, images, HTML rich text |
 | Quick copy | One-click copy with "Copied ✓" feedback |
-| Cloud Sync | Sync clipboard data across devices via GitHub Gist with auto-sync |
+| Cloud Sync | Sync clipboard data across devices via GitHub Gist; all data encrypted with AES-256-GCM |
 | Trash bin | Soft delete with 30-day retention; restore or permanently delete |
 | Inline editing | Floating toolbar to edit text content directly; unsaved changes confirmation |
 | Fullscreen view | Open content in a new tab with full-width layout; supports editing, syntax highlighting |
@@ -136,6 +136,7 @@ clipstash-ext/
 │   └── fullscreen.js          # Fullscreen logic
 ├── shared/                    # Shared modules (symlinked from root shared/)
 │   ├── constants.js           # Shared constants
+│   ├── crypto.js              # Encryption & compression (AES-256-GCM + gzip)
 │   ├── dom-utils.js           # DOM utility functions
 │   ├── fullscreen-controller.js # Fullscreen page controller
 │   ├── icons.js               # SVG icon definitions
@@ -162,7 +163,7 @@ clipstash-ext/
 
 - No user data collection
 - All data stored locally (`chrome.storage.local`)
-- Optional Cloud Sync via GitHub Gist (user-controlled; only connects to `api.github.com` when enabled)
+- Optional Cloud Sync via GitHub Gist (user-controlled; only connects to `api.github.com` when enabled; all sync data is always encrypted)
 
 ## Related
 

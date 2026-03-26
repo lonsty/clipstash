@@ -9,26 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Cloud Sync** — sync clipboard data across devices via GitHub Gist; connect with a fine-grained PAT (Gists read/write scope); supports auto-sync with periodic push/pull
-- **Trash bin** — soft delete with 30-day retention; records can be restored or permanently deleted
-- **Trash batch actions** — "Restore All" and "Empty Trash" buttons
+- **Cloud Sync** — sync clipboard data across devices via GitHub Gist; connect with a fine-grained PAT (Gists read/write scope)
+- **Sync encryption** — all cloud data is encrypted with AES-256-GCM + gzip compression; users can set an optional sync password for additional security
+- **Sync password management** — set, change, or remove the sync encryption password with confirmation validation
+- **Auto Sync** — automatically push local changes (debounced) and periodically pull remote updates (5-minute interval); togglable in settings
+- **Quick Sync button** — header shortcut button for one-click manual sync with status indicator (syncing / connected / error)
+- **Image cloud sync** — optional sync of image clipboard items to Gist with per-image (5 MB) and total (50 MB) quota enforcement
+- **Force Push** — when sync password mismatch is detected, offers a force-push option to overwrite cloud data with local data
+- **Cross-device deduplication** — content hash (SHA-256) based dedup prevents duplicate records across devices during sync
+- **Trash bin** — soft delete with 30-day retention; items can be restored or permanently deleted; countdown shows days remaining
+- **Trash batch actions** — "Restore All" and "Empty Trash" buttons for bulk operations
 - **Delete All Permanently** — danger zone action in settings to permanently wipe all data (active + trash)
-- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js` for code reuse between Extension and Desktop
+- **Shared modules** — extracted `shared/` directory with `constants.js`, `messages.js`, `icons.js`, `dom-utils.js`, `fullscreen-controller.js`, `crypto.js` for code reuse between Extension and Desktop
 - **Modular architecture** — `main.js` refactored into modules: `card-renderer.js`, `modal-controller.js`, `trash-panel.js`, `sync-ui.js`, `settings-panel.js`
-- **Sync Tauri commands** — new Rust backend commands for GitHub Gist sync operations (`sync_push`, `sync_pull`, `sync_get_config`, `sync_set_config`, etc.)
+- **Adaptive time refresh** — card relative timestamps and sync "last sync" time auto-refresh at adaptive intervals based on age
+- **Sync Rust backend** — new `sync.rs` and `crypto.rs` modules implementing GitHub Gist sync, AES-256-GCM encryption, and gzip compression in Rust
 
 ### Changed
 
-- **i18n architecture** — shared `BASE_MESSAGES` + platform-specific messages; `mergeMessages()` function for composability
+- **i18n architecture** — shared `BASE_MESSAGES` + platform-specific `DESKTOP_MESSAGES`; `mergeMessages()` function for composability
 - **Time formatting** — delegated to shared `dom-utils.js` with dependency-injected `t()` function
-- **Code organization** — `main.js` reduced from ~1200 lines to ~300 lines via module extraction; `fullscreen.js` and `sticky.js` now use shared `fullscreen-controller.js`
-- **Database schema** — added `deleted_at` column, `sync_meta` table, and trash-related queries for soft-delete support
-- **Storage layer** — added trash operations (`soft_delete`, `restore`, `empty_trash`, `get_trash_items`) and sync-related data conversion functions
-- **Rust dependencies** — added `reqwest` (with JSON feature) for GitHub API communication
-
-### Fixed
-
-- **Sync data format** — `updated_at` field correctly included in snake_case record conversion
+- **Code organization** — `main.js` reduced from ~1200 lines to ~400 lines via module extraction; `fullscreen.js` and `sticky.js` now use shared `fullscreen-controller.js`
+- **Database schema** — added `deleted_at` and `content_hash` columns, `sync_meta` table, and trash-related queries
+- **Storage layer** — added trash operations (`soft_delete`, `restore`, `purge_expired`, `get_deleted`), sync data conversion, and pending deletion/restoration tracking
+- **Rust dependencies** — added `reqwest`, `aes-gcm`, `flate2`, `pbkdf2`, `sha2`, `base64`, `rand` for sync and encryption
 
 ## [0.1.3] - 2026-03-20
 
@@ -55,7 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fullscreen header streamlined** — removed duplicate meta info from header (kept only in bottom status bar); fixed header height to 44px for consistent edit/view transitions
 - **Close to tray setting removed** — removed non-functional `closeToTray` toggle from settings UI (behavior unchanged: window always hides on focus loss)
 - **Editor height behavior** — dynamic height adjustment to match content (uses `max(viewHeight, scrollHeight, 80)`) with auto-grow on input
-- **Error handling** — improved error logging for database operations
 - **Toolbar button opacity** — three-level progressive opacity: default 0.25 → content area hover 0.75 → button hover 1; reduces text obstruction
 - **Window capabilities** — added `sticky_*` window permissions to capabilities config
 

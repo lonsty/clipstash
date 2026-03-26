@@ -5,7 +5,7 @@
  * Base messages shared across both Extension and Desktop.
  * Platform-specific keys can be added in each platform's own i18n module.
  */
-export const BASE_MESSAGES = {
+const BASE_MESSAGES = {
   en: {
     appName: 'ClipStash',
     moveAllToTrash: 'Move All to Trash',
@@ -81,6 +81,8 @@ export const BASE_MESSAGES = {
     // Cloud Sync
     settingSync: 'Cloud Sync',
     settingSyncDesc: 'Sync via GitHub Gist',
+    syncStepToken: 'Connect',
+    syncStepOptions: 'Options',
     syncTokenPlaceholder: 'GitHub Personal Access Token',
     syncConnect: 'Connect',
     syncDisconnect: 'Disconnect',
@@ -137,8 +139,9 @@ export const BASE_MESSAGES = {
     settingAutoSyncDesc: 'Automatically sync when changes are made',
     // Sync Password (Encryption)
     syncPassword: 'Sync Password',
-    syncPasswordDesc: 'Encrypt data before uploading to cloud',
+    syncPasswordDesc: 'Required — encrypts data before uploading',
     syncPasswordPlaceholder: 'Enter sync password',
+    syncPasswordShow: 'Show / Hide password',
     syncPasswordSet: 'Set',
     syncPasswordChange: 'Change',
     syncPasswordRemove: 'Remove',
@@ -152,7 +155,10 @@ export const BASE_MESSAGES = {
     syncPasswordTooShort: 'At least {n} characters',
     syncPasswordTooLong: 'At most {n} characters',
     syncEncryptionOn: 'Sync data is encrypted',
-    syncEncryptionOff: 'Sync data is not encrypted. Set a password to enable encryption',
+    syncEncryptionOff: 'Set a password to enable sync',
+    // Sync setup hints (header quick-sync button tooltip)
+    syncSetupHintNoToken: 'Set up token and password in Settings to enable sync',
+    syncSetupHintNoPassword: 'Set a sync password in Settings to enable sync',
     // Image Sync
     settingSyncImages: 'Sync Images',
     settingSyncImagesDesc: 'Include images in cloud sync',
@@ -240,6 +246,8 @@ export const BASE_MESSAGES = {
     // Cloud Sync
     settingSync: '云端同步',
     settingSyncDesc: '通过 GitHub Gist 同步数据',
+    syncStepToken: '连接',
+    syncStepOptions: '选项',
     syncTokenPlaceholder: 'GitHub 个人访问令牌',
     syncConnect: '连接',
     syncDisconnect: '断开连接',
@@ -296,8 +304,9 @@ export const BASE_MESSAGES = {
     settingAutoSyncDesc: '数据变更时自动同步',
     // Sync Password (Encryption)
     syncPassword: '同步密码',
-    syncPasswordDesc: '上传到云端前加密数据',
+    syncPasswordDesc: '必填 — 上传前加密数据',
     syncPasswordPlaceholder: '输入同步密码',
+    syncPasswordShow: '显示 / 隐藏密码',
     syncPasswordSet: '设置',
     syncPasswordChange: '修改',
     syncPasswordRemove: '移除',
@@ -311,7 +320,10 @@ export const BASE_MESSAGES = {
     syncPasswordTooShort: '至少 {n} 个字符',
     syncPasswordTooLong: '最多 {n} 个字符',
     syncEncryptionOn: '同步数据已加密',
-    syncEncryptionOff: '同步数据未加密，设置密码后自动启用加密',
+    syncEncryptionOff: '设置密码以启用同步',
+    // Sync setup hints (header quick-sync button tooltip)
+    syncSetupHintNoToken: '在设置中配置 Token 和密码以启用同步',
+    syncSetupHintNoPassword: '在设置中设置同步密码以启用同步',
     // Image Sync
     settingSyncImages: '同步图片',
     settingSyncImagesDesc: '将图片纳入云端同步',
